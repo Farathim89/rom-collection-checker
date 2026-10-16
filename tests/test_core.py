@@ -394,3 +394,22 @@ def test_hidden_regions():
         assert e("A (Version 3.5)").scopes == set()                     # "Other" hides what isn't a region
     finally:
         dat.HIDDEN_REGIONS = set()
+
+
+def test_switch_outdated_updates(tmp_path):
+    from app.core import switch
+    d = tmp_path / "dats"
+    d.mkdir()
+    (d / "Nintendo - Switch.dat").write_text(
+        'game (\n\tname "Kart (World)"\n\tserial "0100152000022000"\n\trom ( name "Kart.nsp" size 1 crc 00000000 )\n)\n'
+        'game (\n\tname "Well (World)"\n\tserial "010020D01AD24000"\n\trom ( name "Well.nsp" size 1 crc 00000000 )\n)\n',
+        encoding="utf-8")
+    games = tmp_path / "Switch"
+    games.mkdir()
+    for n in ("Kart [0100152000022000][v0].nsp", "Kart [0100152000022800][v1114112].nsp", "Well [010020D01AD24000][v0].nsp",
+              "Well [010020D01AD24800][v655360].nsp"):
+        (games / n).write_bytes(b"x")
+    r = scan_console(BY_KEY["switch"], [str(games)], dat.DatStore(d), hashing.Tools(), ScanCache(tmp_path / "c.json"), [])
+    extra = {"latest": {"0100152000022000": 1441792, "010020D01AD24000": 655360}, "dates": {"0100152000022000": "2026-09-01"}}
+    assert [(g, m, n) for g, m, n, _d, _l in switch.outdated(r, extra)] == [("Kart (World)", 1114112, 1441792)]
+    assert switch.version_text(1114112) == "v17 (1114112)" and switch.version_text(0) == "none"

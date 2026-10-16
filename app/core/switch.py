@@ -74,7 +74,7 @@ def build(titledb: Path, dats: Path) -> int:
     names, newest update of each game). Returns the number of games."""
     titles = json.loads((titledb / "US.en.json").read_text(encoding="utf-8"))
     versions = json.loads((titledb / "versions.json").read_text(encoding="utf-8"))
-    games, extra = {}, {"names": {}, "latest": {}, "icons": {}}
+    games, extra = {}, {"names": {}, "latest": {}, "icons": {}, "dates": {}}
     for t in titles.values():
         tid, name = (t.get("id") or "").upper(), _TM.sub("", t.get("name") or "").strip()
         if not re.fullmatch(r"0100[0-9A-F]{12}", tid) or not name:
@@ -91,7 +91,9 @@ def build(titledb: Path, dats: Path) -> int:
             extra["names"][tid] = name
     for tid, vs in versions.items():
         if vs:
-            extra["latest"][tid.upper()] = max(int(v) for v in vs)
+            newest = max(vs, key=int)
+            extra["latest"][tid.upper()] = int(newest)
+            extra["dates"][tid.upper()] = vs[newest]
     seen = set()
     lines = ['clrmamepro (\n\tname "Nintendo - Switch"\n\tdescription "from titledb (US eShop)"\n)\n']
     for tid, (name, demo, size, _rel) in sorted(games.items(), key=lambda x: x[1][0].lower()):
@@ -107,8 +109,29 @@ def build(titledb: Path, dats: Path) -> int:
     return len(games)
 
 
+def outdated(res, extra: dict) -> list[tuple[str, int, int, str, str]]:
+    """Your Switch games whose update is older than the newest (or missing while there is one):
+    (game, your version, newest version, newest's date, your base file)."""
+    out = []
+    for t in res.titles.values():
+        for g, labels in t.have.items():
+            tid = t.games[g][0].serial.upper()
+            newest = extra.get("latest", {}).get(tid)
+            if not newest:
+                continue
+            mine = max((v for k, v, _t, _l in res.extras.get(g, []) if k == "update" and v >= 0), default=0)
+            if mine < newest:
+                out.append((g, mine, newest, extra.get("dates", {}).get(tid, ""), labels[0]))
+    return sorted(out, key=lambda x: x[0].lower())
+
+
+def version_text(v: int) -> str:
+    """v1114112 -> "v17 (1114112)"; 0 -> "none"."""
+    return f"v{v // 65536} ({v})" if v else "none"
+
+
 def load_extra(dats: Path) -> dict:
     try:
         return json.loads((dats / "switch-extra.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return {"names": {}, "latest": {}}
+        return {"names": {}, "latest": {}, "icons": {}, "dates": {}}

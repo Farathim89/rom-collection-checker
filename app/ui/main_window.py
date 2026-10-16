@@ -398,9 +398,10 @@ class MainWindow(QMainWindow):
         self.p_unknown = table(["Console", "File", "Looks like", "Known as (TOSEC / hacks list)"], {0: 170, 1: 600, 2: 110}, 3)
         self.p_wrong = table(["File", "Belongs to", "Game"], {0: 700, 1: 170}, 2)
         self.p_errors = table(["File", "Problem"], {0: 800}, 1)
+        self.p_updates = table(["Game", "Your update", "Newest update", "Released", "Your file"], {0: 380, 1: 140, 2: 140, 3: 110}, 4)
         for t, name in ((self.p_dupes, "Duplicates"), (self.p_unknown, "Not in No-Intro"),
-                        (self.p_wrong, "Wrong console"), (self.p_errors, "Unreadable")):
-            col = 1 if t in (self.p_dupes, self.p_unknown) else 0
+                        (self.p_wrong, "Wrong console"), (self.p_errors, "Unreadable"), (self.p_updates, "Switch updates")):
+            col = {self.p_dupes: 1, self.p_unknown: 1, self.p_updates: 4}.get(t, 0)
             t.itemDoubleClicked.connect(lambda it, t=t, col=col: (f := t.item(it.row(), col).data(Qt.UserRole))
                                         and open_folder_of(f))
             self.ptabs.addTab(t, name)
@@ -700,8 +701,19 @@ class MainWindow(QMainWindow):
         fill(self.p_unknown, u_rows, 1, u_paths)
         fill(self.p_wrong, [list(w) for w in self.wrong], 0, [w[0] for w in self.wrong])
         fill(self.p_errors, e_rows, 0, e_paths)
-        for i, n in enumerate((len(d_rows), len(u_rows), len(self.wrong), len(e_rows))):
-            self.ptabs.setTabText(i, f"{['Duplicates', 'Not in No-Intro', 'Wrong console', 'Unreadable'][i]} ({n})")
+        # Switch games with an older update than the newest (titledb)
+        up_rows, up_paths = [], []
+        sw = next((r for r in self.results.values() if r.console.source == "titledb"), None)
+        if sw is not None:
+            from ..core import switch  # noqa: PLC0415
+            self._switch_extra = getattr(self, "_switch_extra", None) or switch.load_extra(DATS)
+            for g, mine, newest, date, lb in switch.outdated(sw, self._switch_extra):
+                up_rows.append([re.sub(r" \(World\)", "", g), switch.version_text(mine), switch.version_text(newest),
+                                f"{date[:10]}", lb])
+                up_paths.append(lb)
+        fill(self.p_updates, up_rows, 4, up_paths)
+        for i, n in enumerate((len(d_rows), len(u_rows), len(self.wrong), len(e_rows), len(up_rows))):
+            self.ptabs.setTabText(i, f"{['Duplicates', 'Not in No-Intro', 'Wrong console', 'Unreadable', 'Switch updates'][i]} ({n})")
 
     # -- actions ----------------------------------------------------------------------------------------------
     def busy(self, on: bool, text: str = "") -> None:
