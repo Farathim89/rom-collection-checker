@@ -135,6 +135,7 @@ class ConsoleResult:
     others: list[Item] = field(default_factory=list)  # every file No-Intro doesn't list (also in 0 - folders)
     by_name: dict = field(default_factory=dict)     # item label -> game, for discs that can only be matched by name
     identified: dict = field(default_factory=dict)  # label -> (game, sure): named by its header, not verified
+    extras: dict = field(default_factory=dict)      # Switch: game -> [(update / dlc, version, title id, file)]
 
     def counts(self, kinds: set[str], scope) -> tuple[int, int]:
         """(titles in scope, titles you have - any version of them counts)."""
@@ -170,6 +171,8 @@ def scan_console(c: Console, folders: list[str], dats: DatStore, tools: Tools, c
     ix = index(entries)
     for e in entries:
         res.titles.setdefault(e.title, TitleInfo(e.title)).games.setdefault(e.game, []).append(e)
+    if c.source == "titledb":
+        return _scan_switch(c, folders, res, entries, skip)
     exts = set(c.exts) | set(ARCHIVES)
     names, names_entries = ({}, {})
     by_game_entries: dict[str, list[Entry]] = {}
@@ -281,6 +284,46 @@ def scan_console(c: Console, folders: list[str], dats: DatStore, tools: Tools, c
 
 
 _TRACK = re.compile(r"\s*\(Track \d+\)", re.I)
+
+
+def _scan_switch(c: Console, folders: list[str], res: ConsoleResult, entries: list[Entry], skip: list[str]):
+    """Switch files by the title ID in their name (or the folder's): base games count; updates and DLC are noted
+    with their game. A name without an ID is matched by name."""
+    from . import switch  # noqa: PLC0415
+    by_id = {e.serial.upper(): e for e in entries if e.serial}
+    names = name_index(entries)
+    files = walk_files(folders, set(c.exts), skip)
+    res.files = len(files)
+    for p in files:
+        if not switch.first_part(p.name):
+            continue
+        label = str(p)
+        ids = switch.ids_in(p.name) or switch.ids_in(p.parent.name)
+        if not ids:
+            g = match_by_name(p, names) or match_by_name(p.parent, names)
+            if g:
+                e = names_or_entry(entries, g)
+                res.identified[label] = (g, False)
+                res.titles[e.title].have.setdefault(g, []).append(label)
+            else:
+                res.unknown.append(Item(label, "", 0, []))
+            continue
+        for tid, ver in ids:
+            e = by_id.get(f"{switch.base_of(tid):016X}")
+            if e is None:                          # an ID the US list doesn't have (another region): by its name
+                clean = re.sub(r"\s*\[[^\]]*\]", "", p.stem).strip()
+                g = names.get(_norm(clean)) or names.get(_norm(re.sub(r"\s*[\(\[].*$", "", clean)))
+                e = names_or_entry(entries, g) if g else None
+            if e is None:
+                res.unknown.append(Item(label, "", 0, []))
+                continue
+            k = switch.kind(tid)
+            if k == "base":
+                res.identified[label] = (e.game, True)
+                res.titles[e.title].have.setdefault(e.game, []).append(label)
+            else:
+                res.extras.setdefault(e.game, []).append((k, ver, f"{tid:016X}", label))
+    return res
 
 
 _ENTRY_BY_GAME: dict[int, dict[str, Entry]] = {}

@@ -114,6 +114,12 @@ class DatStore:
         if not source:
             from .consoles import CONSOLES  # noqa: PLC0415
             source = next((c.source for c in CONSOLES if c.dat == dat), "no-intro")
+        if source == "titledb":                         # Switch: built from titledb (about 90 MB to fetch)
+            from . import switch  # noqa: PLC0415
+            n = switch.fetch(self.folder.parent / "titledb", timeout=max(timeout, 300))
+            switch.build(self.folder.parent / "titledb", self.folder)
+            self._cache.pop(dat, None)
+            return n
         url = URL.format(source=source, name=urllib.parse.quote(dat))
         req = urllib.request.Request(url, headers={"User-Agent": "ROMCollectionChecker"})
         with urllib.request.urlopen(req, timeout=timeout) as r:   # noqa: S310 - fixed https host

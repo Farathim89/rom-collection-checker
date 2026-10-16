@@ -584,6 +584,25 @@ class MainWindow(QMainWindow):
                 it.setData(Qt.UserRole, mine[0])
                 it.setToolTip("\n".join(mine))
             self.versions.addItem(it)
+        # Switch: the updates and DLC you have for it, and the newest update there is
+        if r.console.source == "titledb":
+            from ..core import switch  # noqa: PLC0415
+            extra = getattr(self, "_switch_extra", None) or switch.load_extra(DATS)
+            self._switch_extra = extra
+            for g in shown:
+                xs = r.extras.get(g, [])
+                tid = r.titles[ti.title].games[g][0].serial
+                newest = extra.get("latest", {}).get(tid.lower()) or extra.get("latest", {}).get(tid)
+                ups = [v for k, v, _t, _l in xs if k == "update"]
+                if ups or newest:
+                    have_v = max(ups) if ups else 0
+                    state = "newest" if newest and have_v >= newest else f"newest is v{newest // 65536}" if newest else ""
+                    it = QListWidgetItem(f"      update: {'v' + str(have_v // 65536) if ups else 'none'}   ({state})")
+                    it.setForeground(QColor(p.ready if newest and have_v >= newest else p.muted))
+                    self.versions.addItem(it)
+                for k, _v, t, _l in xs:
+                    if k == "dlc":
+                        self.versions.addItem(QListWidgetItem(f"      DLC: {extra.get('names', {}).get(t, t)}"))
         if len(ti.games) > len(shown):
             it = QListWidgetItem(f"   + {len(ti.games) - len(shown)} from regions you hid")
             it.setFlags(Qt.NoItemFlags)
@@ -672,8 +691,9 @@ class MainWindow(QMainWindow):
         ok = QMessageBox.question(
             self, "Download No-Intro lists?",
             f"To know which games exist, the checker needs the No-Intro / Redump list for {len(need)} console(s):\n\n"
-            + "\n".join(need) + "\n\nThey are text files (a few MB each) from github.com/libretro/libretro-database, "
-            "kept in the checker's data folder. Download them now?")
+            + "\n".join(need) + "\n\nThey are text files (a few MB each) from github.com/libretro/libretro-database"
+            + (" - the Switch list comes from github.com/blawar/titledb (about 90 MB)" if any("Switch" in n for n in need)
+               else "") + ", kept in the checker's data folder. Download them now?")
         if ok != QMessageBox.Yes:
             return False
         return True

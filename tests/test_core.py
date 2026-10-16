@@ -355,3 +355,21 @@ def test_quick_header_check_names_a_disc_without_reading_it(tmp_path):
     assert r.counts({"game"}, "All") == (1, 1)
     idx = serial_index(store.entries("Nintendo - GameCube"))
     assert identify(Probe("GCGE", version=0), idx)[0] == "Cube Game (USA)"
+
+
+def test_switch_files_by_title_id(tmp_path):
+    from app.core import switch
+    assert switch.kind(0x0100152000022800) == "update" and switch.base_of(0x0100152000022800) == 0x0100152000022000
+    assert switch.kind(0x0100217014267007) == "dlc" and switch.base_of(0x0100217014267007) == 0x0100217014266000
+    d = tmp_path / "dats"
+    d.mkdir()
+    (d / "Nintendo - Switch.dat").write_text('game (\n\tname "Kart Game (World)"\n\tserial "0100152000022000"\n'
+                                             '\trom ( name "Kart Game (World).nsp" size 1 crc 00000000 )\n)\n', encoding="utf-8")
+    games = tmp_path / "Switch"
+    games.mkdir()
+    for n in ("Kart [0100152000022000][v0].nsp", "Kart [0100152000022800][v1114112].nsp", "x.part02.rar"):
+        (games / n).write_bytes(b"encrypted")
+    r = scan_console(BY_KEY["switch"], [str(games)], dat.DatStore(d), hashing.Tools(), ScanCache(tmp_path / "c.json"), [])
+    assert r.counts({"game"}, "All") == (1, 1)
+    assert [(k, v) for k, v, _t, _l in r.extras["Kart Game (World)"]] == [("update", 1114112)]
+    assert not r.unknown                                   # .part02 of a split archive isn't counted
