@@ -86,6 +86,10 @@ CONSOLES: tuple[Console, ...] = (
             ("PC Engine CD", "TurboGrafx-CD", "TurboGrafx CD"), source="redump", name_only=("chd",)),
     Console("pcfx", "PC-FX", "NEC", "NEC - PC-FX", ("bin", "chd"), ("NEC PC-FX", "PC-FX"), source="redump",
             name_only=("chd",)),
+    Console("cd32", "Amiga CD32", "Commodore", "Commodore - CD32", ("bin", "iso", "chd"),
+            ("Amiga CD32", "Commodore Amiga CD32", "CD32"), source="redump", name_only=("chd",)),
+    Console("cdtv", "CDTV", "Commodore", "Commodore - CDTV", ("bin", "iso", "chd"), ("Commodore CDTV", "CDTV"),
+            source="redump", name_only=("chd",)),
     Console("3do", "3DO", "The 3DO Company", "The 3DO Company - 3DO", ("bin", "iso", "chd"), ("3DO",), source="redump",
             name_only=("chd",)),
 )
