@@ -9,7 +9,8 @@ the sister of [Book Collection Checker](https://github.com/Farathim89/book-colle
 - **Have / missing per console** - every game file is matched against [No-Intro](https://no-intro.org)'s list of
   known dumps **by its content** (CRC), so badly named files, copier headers (SNES, PC Engine, Mega Drive …), iNES
   headers, `.smd` interleave and N64 byte order don't matter. Zip, 7z and rar are read inside.
-  - Region filter: USA / Europe / Japan / Other / All - any version of a game counts as having it.
+  - Regions: tick the ones you want (USA, Europe, Japan, Other) - games only released elsewhere are hidden and not
+    counted. Any version of a game counts as having it.
   - Count only official games, or also unlicensed, prototypes, demos, homebrew …
   - Box art (libretro thumbnails), every No-Intro version of a game with the ones you have ticked.
   - **Copy / save the missing list.**
@@ -17,6 +18,13 @@ the sister of [Book Collection Checker](https://github.com/Farathim89/book-colle
   compared with what you have and gets a plan - *move it in*, or leave it (*you have it*, *bad dump*, *hack*,
   *unknown console*). ROMs are taken out of their archives (not Nintendo DS: emulators read `.7z`) and can get their
   No-Intro name. Nothing moves until you press Apply; every sort can be undone.
+  - Packs are read by their folder names too (`Atari 2600oms`, `Sega 32X`), arcade sets (MAME, Neo Geo) are set
+    aside, and other dumps of a game you already have stay in the inbox.
+  - *Make console folders* adds empty `Maker\Console` folders to the inbox, laid out like your collection: a game you
+    drop in one is sorted to that console.
+- **Downloads** - paste links (http / https) and they download into the inbox, a few at a time, with progress,
+  pause / resume / retry; unfinished ones go on after a restart, and a finished file never overwrites one that is
+  there. Optionally the inbox is sorted when all are done. It downloads the links you give it - it doesn't search.
 - **Clean names** - known dumps get their official No-Intro name (`smb.nes` → `Super Mario Bros. (World).nes`),
   with a preview and undo.
 - **Problems** - duplicates, files No-Intro doesn't know (bad dumps, hacks, translations), games in the wrong console
