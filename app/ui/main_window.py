@@ -316,9 +316,16 @@ class MainWindow(QMainWindow):
         w = QWidget()
         v = QVBoxLayout(w)
         v.setContentsMargins(0, 0, 0, 0)
+        head = QHBoxLayout()
         self.console_title = QLabel()
         self.console_title.setObjectName("pagetitle")
-        v.addWidget(self.console_title)
+        head.addWidget(self.console_title, 1)
+        self.b_verify = QPushButton("✓  Verify (full checksums)")
+        self.b_verify.setToolTip("Reads every file of this console and checks it against the list by checksum "
+                                 "(games marked ◇ were only named by their header)")
+        self.b_verify.clicked.connect(self.verify_console)
+        head.addWidget(self.b_verify)
+        v.addLayout(head)
         split = QSplitter()
         self.games = table(GAME_COLS, {0: 380, 1: 150, 2: 100, 3: 80}, 4)
         self.games.itemSelectionChanged.connect(self.show_game)
@@ -568,8 +575,10 @@ class MainWindow(QMainWindow):
             e = ti.games[g][0]
             mine = ti.have.get(g)
             by_name = bool(mine) and all(lb in r.by_name for lb in mine)
-            it = QListWidgetItem(("≈  " if by_name else "✓  " if mine else "✗  ") + g
-                                 + ("" if e.kind == "game" else f"   [{e.kind}]") + ("   (by name)" if by_name else ""))
+            by_head = bool(mine) and not by_name and all(lb in r.identified for lb in mine)
+            it = QListWidgetItem(("≈  " if by_name else "◇  " if by_head else "✓  " if mine else "✗  ") + g
+                                 + ("" if e.kind == "game" else f"   [{e.kind}]") + ("   (by name)" if by_name else "")
+                                 + ("   (identified - Verify checks it)" if by_head else ""))
             it.setForeground(QColor(p.ready if mine else p.muted))
             if mine:
                 it.setData(Qt.UserRole, mine[0])
@@ -693,7 +702,8 @@ class MainWindow(QMainWindow):
                     continue
                 w.signals.progress.emit(f"Reading {c.name}…")
                 out[k] = scan_console(c, folders, self.dats, tools, self.cache, self.s.skip_folders,
-                                      w.signals.progress.emit, lambda: w.stop, extra=self.extra)
+                                      w.signals.progress.emit, lambda: w.stop, extra=self.extra,
+                                      quick=self.s.quick_check)
                 self.cache.save()
             return out, wrong_console(out, self.dats)
 
@@ -832,6 +842,27 @@ class MainWindow(QMainWindow):
         self._download_worker = w
         self.status.setText(f"Downloading version {rel.version}…")
         QThreadPool.globalInstance().start(w)
+
+    def verify_console(self) -> None:
+        """The full checksum check for the console shown (games named by their header get verified)."""
+        key = self.current_key()
+        if key not in BY_KEY or key not in self.folders():
+            return
+        c, folders = BY_KEY[key], self.folders()[key]
+        tools = self._job_tools = Tools(self.s.sevenzip, self.s.winrar_dir, self.s.dolphin_tool)
+
+        def job(w: Worker):
+            r = scan_console(c, folders, self.dats, tools, self.cache, self.s.skip_folders, w.signals.progress.emit,
+                             lambda: w.stop, extra=self.extra, quick=False)
+            self.cache.save()
+            return r
+
+        def done(r) -> None:
+            self.results[key] = r
+            self.fill_menu()
+            total, have = r.counts(self.kinds(), self.scope())
+            self.status.setText(f"{c.name}: verified - you have {have} of {total}")
+        self.run(job, done, f"Verifying {c.name}…")
 
     def undo_dialog(self) -> None:
         from .dialogs import UndoDialog  # noqa: PLC0415

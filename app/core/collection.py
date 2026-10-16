@@ -61,6 +61,17 @@ class ScanCache:
             return [Item(str(p), i[0], i[1], i[2]) for i in e["i"]], e.get("e", "")
         return None
 
+    def get_probe(self, p: Path, st: os.stat_result) -> tuple[str, bool] | None:
+        """A header check done before: (game or "", sure)."""
+        e = self.data.get("probe:" + str(p))
+        if e and e["s"] == st.st_size and e["m"] == int(st.st_mtime):
+            return e["g"], e["sure"]
+        return None
+
+    def put_probe(self, p: Path, st: os.stat_result, game: str, sure: bool) -> None:
+        self.data["probe:" + str(p)] = {"s": st.st_size, "m": int(st.st_mtime), "g": game, "sure": sure}
+        self.dirty = True
+
     def put(self, p: Path, st: os.stat_result, items: list[Item], err: str) -> None:
         self.data[str(p)] = {"s": st.st_size, "m": int(st.st_mtime), "i": [[i.inner, i.size, i.crcs] for i in items],
                              "e": err}
@@ -123,6 +134,7 @@ class ConsoleResult:
     known: dict = field(default_factory=dict)       # item label -> extra.Known (TOSEC / hacks / homebrew)
     others: list[Item] = field(default_factory=list)  # every file No-Intro doesn't list (also in 0 - folders)
     by_name: dict = field(default_factory=dict)     # item label -> game, for discs that can only be matched by name
+    identified: dict = field(default_factory=dict)  # label -> (game, sure): named by its header, not verified
 
     def counts(self, kinds: set[str], scope) -> tuple[int, int]:
         """(titles in scope, titles you have - any version of them counts)."""
@@ -143,8 +155,15 @@ def index(entries: list[Entry]) -> dict[str, list[Entry]]:
 
 
 def scan_console(c: Console, folders: list[str], dats: DatStore, tools: Tools, cache: ScanCache,
-                 skip: list[str], progress=lambda text: None, stop=lambda: False, extra=None) -> ConsoleResult:
-    """extra: an ExtraStore - files No-Intro doesn't list are looked up in TOSEC / hacks / homebrew too."""
+                 skip: list[str], progress=lambda text: None, stop=lambda: False, extra=None,
+                 quick: bool = False) -> ConsoleResult:
+    """extra: an ExtraStore - files No-Intro doesn't list are looked up in TOSEC / hacks / homebrew too.
+    quick: discs, DS and N64 games are named by their header (a few KB) instead of a checksum of the whole file;
+    files that already have a checksum count as verified."""
+    from .probe import QUICK_CONSOLES, identify, probe, serial_index  # noqa: PLC0415
+    quick = quick and c.key in QUICK_CONSOLES
+    sidx = serial_index(entries_for_quick(dats, c)) if quick else {}
+    discs: dict[tuple[str, str], str] = {}        # (folder, disc name) -> game, for a disc's other tracks
     res = ConsoleResult(c, folders, dats.version(c.dat))
     known_ix = extra.index(c.dat) if extra is not None else {}
     entries = dats.entries(c.dat)
@@ -173,6 +192,29 @@ def scan_console(c: Console, folders: list[str], dats: DatStore, tools: Tools, c
             res.errors[str(p)] = str(e)
             continue
         got = cache.get(p, st)
+        if c.key == "ps3" and p.suffix.lower() == ".sfo" and                 not (p.name.upper() == "PARAM.SFO" and p.parent.name.upper() == "PS3_GAME"):
+            continue                               # trophies, updates: only the game's own PARAM.SFO
+        if got is None and quick and COLLECTION.search(str(p)):
+            continue                               # 0 - Hacks / Translations …: on purpose, not owned games
+        if got is None and quick:
+            label = str(p.parent.parent) if p.suffix.lower() == ".sfo" else str(p)
+            base = (str(p.parent).lower(), _TRACK.sub("", p.stem).strip().lower())
+            if _TRACK.search(p.stem) and base in discs:     # another track of a disc named by its header
+                res.titles[names_or_entry(entries, discs[base]).title].have.setdefault(discs[base], []).append(label)
+                continue
+            pg = cache.get_probe(p, st)
+            if pg is None:
+                pr = probe(p, c.key, tools.dolphin)
+                pg = identify(pr, sidx, p, st.st_size) if pr else ("", False)
+                cache.put_probe(p, st, *pg)
+            if pg[0]:
+                res.identified[label] = pg
+                discs[base] = pg[0]
+                res.titles[names_or_entry(entries, pg[0]).title].have.setdefault(pg[0], []).append(label)
+                continue
+            if c.key == "ps3":                      # a game folder can't get a checksum
+                res.unknown.append(Item(label, "", st.st_size, []))
+                continue
         if got is None:
             if stop() or tools.cancel.is_set():
                 break
@@ -239,6 +281,20 @@ def scan_console(c: Console, folders: list[str], dats: DatStore, tools: Tools, c
 
 
 _TRACK = re.compile(r"\s*\(Track \d+\)", re.I)
+
+
+_ENTRY_BY_GAME: dict[int, dict[str, Entry]] = {}
+
+
+def entries_for_quick(dats: DatStore, c: Console) -> list[Entry]:
+    return dats.entries(c.dat)
+
+
+def names_or_entry(entries: list[Entry], game: str) -> Entry:
+    m = _ENTRY_BY_GAME.get(id(entries))
+    if m is None:
+        m = _ENTRY_BY_GAME[id(entries)] = {e.game: e for e in entries}
+    return m[game]
 
 
 def _norm(s: str) -> str:

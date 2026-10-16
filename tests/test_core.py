@@ -335,3 +335,23 @@ def test_sort_a_disc_with_its_cue_and_tracks(tmp_path):
     assert (dc / "Name Game (USA).cdi").is_file()
     tidy_inbox(plan, str(root), tmp_path / "undo")
     assert not (root / "_unsorted" / "pack").exists()
+
+
+def test_quick_header_check_names_a_disc_without_reading_it(tmp_path):
+    from app.core.probe import Probe, identify, serial_index
+    d = tmp_path / "dats"
+    d.mkdir()
+    (d / "Nintendo - GameCube.dat").write_text(
+        'game (\n\tname "Cube Game (USA)"\n\tserial "DL-DOL-GCGE-USA"\n\trom ( name "Cube Game (USA).iso" size 4096 crc 00000001 )\n)\n'
+        'game (\n\tname "Cube Game (USA) (Rev 1)"\n\tserial "DL-DOL-GCGE-USA"\n\trom ( name "Cube Game (USA) (Rev 1).iso" size 4096 crc 00000002 )\n)\n',
+        encoding="utf-8")
+    games = tmp_path / "GameCube"
+    games.mkdir()
+    head = b"GCGE01" + bytes([0, 1]) + bytes(20) + b"\xc2\x33\x9f\x3d"     # ID, disc 0, version 1, GC magic
+    (games / "my cube game.iso").write_bytes(head + bytes(4096 - len(head)))
+    store = dat.DatStore(d)
+    r = scan_console(BY_KEY["gc"], [str(games)], store, hashing.Tools(), ScanCache(tmp_path / "c.json"), [], quick=True)
+    assert list(r.identified.values()) == [("Cube Game (USA) (Rev 1)", True)]
+    assert r.counts({"game"}, "All") == (1, 1)
+    idx = serial_index(store.entries("Nintendo - GameCube"))
+    assert identify(Probe("GCGE", version=0), idx)[0] == "Cube Game (USA)"

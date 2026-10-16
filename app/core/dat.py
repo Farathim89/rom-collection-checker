@@ -15,6 +15,7 @@ MAX_AGE = 30 * 86400   # lists are refreshed when a month old (when you ask for 
 _GAME = re.compile(r'game \(\s*name "((?:[^"\\]|\\.)*)"(.*?)\n\)', re.S)
 _ROM = re.compile(r'rom \( name "((?:[^"\\]|\\.)*)" size (\d+) crc ([0-9A-Fa-f]{1,8})')
 _TAG = re.compile(r"\(([^)]*)\)")
+_SERIAL = re.compile(r'^\s*serial "([^"]*)"', re.M)
 
 # what counts as a real, officially released game; everything else is an "extra"
 KINDS = (("unlicensed", re.compile(r"^Unl$", re.I)),
@@ -39,6 +40,7 @@ class Entry:
     title: str     # "Super Mario Bros."
     regions: tuple[str, ...]
     kind: str      # "game" for official releases, else unlicensed / prototype / demo / homebrew / ...
+    serial: str = ""   # the game's ID as the list writes it (SLUS-20946, DL-DOL-GM8P-EUR, BKAJ …), "" if none
 
     @property
     def scopes(self) -> set[str]:
@@ -81,10 +83,12 @@ def parse(text: str) -> list[Entry]:
     out: list[Entry] = []
     for gm in _GAME.finditer(text):
         game = gm.group(1)
+        sm = _SERIAL.search(gm.group(2))
+        serial = sm.group(1) if sm else ""
         for rm in _ROM.finditer(gm.group(2)):
             rom = rm.group(1)
             out.append(Entry(game, rom, int(rm.group(2)), rm.group(3).lower().zfill(8), title_of(game),
-                             regions_of(game), kind_of(game, rom)))
+                             regions_of(game), kind_of(game, rom), serial))
     return out
 
 

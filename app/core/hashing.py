@@ -197,9 +197,41 @@ def _zip_items(path: Path, rom_exts: set[str]) -> list[Item]:
     return out
 
 
+PLAIN_EXTS = {"nds", "dsi", "gba", "gb", "gbc", "z64", "iso", "vb", "ws", "wsc", "ngp", "ngc", "a26"}   # never headered
+
+
+def _listed_items(path: Path, tools: Tools, rom_exts: set[str]) -> list[Item] | None:
+    """The CRCs a .7z keeps in its index (7-Zip "l -slt"): exact, without unpacking. Only for big games (DS, N64 …)
+    whose CRC needs no header handling; None = unpack it the normal way."""
+    if not tools.seven or path.suffix.lower() != ".7z":
+        return None
+    out = subprocess.run([tools.seven, "l", "-slt", str(path)], capture_output=True, timeout=120,
+                         creationflags=NO_WINDOW).stdout.decode("utf-8", "replace")
+    entries, cur = [], {}
+    for line in out.splitlines():
+        if line.startswith("Path = "):
+            cur = {"path": line[7:]}
+            entries.append(cur)
+        elif " = " in line and cur:
+            k, v = line.split(" = ", 1)
+            cur[k] = v
+    files = [e for e in entries[1:] if e.get("Folder") != "+" and "Size" in e]    # entries[0] is the archive
+    wanted = [e for e in files if _wanted(e["path"], rom_exts, len(files) == 1)]
+    plain = lambda e: Path(e["path"]).suffix.lower().lstrip(".") in PLAIN_EXTS  # noqa: E731 - no header to strip
+    if not wanted or any(not e.get("CRC") or (int(e["Size"] or 0) <= VARIANT_LIMIT and not plain(e)) for e in wanted):
+        return None
+    return [Item(str(path), Path(e["path"]).name, int(e["Size"]), [e["CRC"].lower().zfill(8)]) for e in wanted]
+
+
 def _extracted_items(path: Path, tools: Tools, rom_exts: set[str]) -> tuple[list[Item], str]:
     if not (tools.seven or tools.unrar or tools.winrar):
         return [], "no 7-Zip or WinRAR to open it"
+    try:
+        listed = _listed_items(path, tools, rom_exts)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        listed = None
+    if listed:
+        return listed, ""
     with tempfile.TemporaryDirectory(prefix="romcheck-") as tmp:
         if not tools.extract_all(path, Path(tmp)):
             return [], "could not be opened"

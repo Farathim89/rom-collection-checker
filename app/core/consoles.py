@@ -65,7 +65,8 @@ CONSOLES: tuple[Console, ...] = (
             ("Playstation", "PlayStation", "PlayStation 1", "PS1", "PSX"), source="redump", name_only=("pbp", "chd")),
     Console("ps2", "PlayStation 2", "Sony", "Sony - PlayStation 2", ("iso", "bin", "chd"),
             ("PlayStation 2", "PS2"), source="redump", name_only=("chd",)),
-    Console("ps3", "PlayStation 3", "Sony", "Sony - PlayStation 3", ("iso",), ("PlayStation 3", "PS3"), source="redump"),
+    Console("ps3", "PlayStation 3", "Sony", "Sony - PlayStation 3", ("iso", "sfo"), ("PlayStation 3", "PS3"), source="redump",
+            name_only=("sfo",)),   # game folders: named by PS3_GAME\PARAM.SFO
     Console("psp", "PSP", "Sony", "Sony - PlayStation Portable", ("iso", "cso", "chd"),
             ("PlayStation Portable", "PSP"), source="redump", name_only=("cso", "chd")),
     Console("gc", "GameCube", "Nintendo", "Nintendo - GameCube", ("iso", "gcm", "rvz", "gcz", "ciso"),

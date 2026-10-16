@@ -134,6 +134,10 @@ class SettingsDialog(QDialog):
                       "hacks), libretro's hacks and homebrew lists - from github.com/libretro/libretro-database")
         xl.clicked.connect(lambda: self._get_extra(ex))
         form.addRow("More lists", xl)
+        self.quick = QCheckBox("Quick check for discs, DS and N64: name games by their header (seconds) - "
+                               "the Verify button on a console does the full checksum check")
+        self.quick.setChecked(s.quick_check)
+        form.addRow("Quick check", self.quick)
         self.auto_update = QCheckBox("Look for a new version of the checker at start (once a day, asks before updating)")
         self.auto_update.setChecked(s.check_updates)
         form.addRow("Updates", self.auto_update)
@@ -213,6 +217,9 @@ class SettingsDialog(QDialog):
         s.take_hacks, s.take_unknown = self.hacks.isChecked(), self.unknown.isChecked()
         s.sevenzip, s.winrar_dir = self.seven.text().strip(), self.winrar.text().strip()
         s.dolphin_tool = self.dolphin.text().strip()
+        if s.quick_check != self.quick.isChecked():
+            s.quick_check = self.quick.isChecked()
+            self.rescan = True
         s.check_updates = self.auto_update.isChecked()
         s.theme = self.theme.current
         self.rescan = self.rescan or before != (s.games_root, s.skip_folders, s.consoles, s.folders)
@@ -300,6 +307,7 @@ class SortDialog(QDialog):
         else:
             dl = []
         have = {k: r.crcs for k, r in m.results.items()}
+        have_games = {k: {g for t in r.titles.values() for g in t.have} for k, r in m.results.items()}
         folders = m.folders()
         tools = Tools(s.sevenzip, s.winrar_dir, s.dolphin_tool)
 
@@ -310,7 +318,7 @@ class SortDialog(QDialog):
                     m.dats.download(BY_KEY[k].dat)
                 except Exception:  # noqa: BLE001 - a console without a list is recognised by file type only
                     pass
-            return make_plan(inbox, folders, have, m.dats, tools, s.games_root, unpack=s.unpack,
+            return make_plan(inbox, folders, have, m.dats, tools, s.games_root, have_games=have_games, unpack=s.unpack,
                              official_names=s.official_names, take_hacks=s.take_hacks, take_unknown_dumps=s.take_unknown,
                              progress=w.signals.progress.emit, stop=lambda: w.stop)
 

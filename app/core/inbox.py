@@ -133,7 +133,8 @@ class Plan:
 
 
 def make_plan(inbox: str, folders: dict[str, list[str]], have_crcs: dict[str, set[str]], dats: DatStore,
-              tools: Tools, games_root: str, *, unpack=True, official_names=True, take_hacks=False,
+              tools: Tools, games_root: str, *, have_games: dict[str, set[str]] | None = None, unpack=True,
+              official_names=True, take_hacks=False,
               take_unknown_dumps=True, progress=lambda t: None, stop=lambda: False) -> Plan:
     """have_crcs: console key -> every CRC variant of the games you already have."""
     plan = Plan(inbox)
@@ -200,8 +201,8 @@ def make_plan(inbox: str, folders: dict[str, list[str]], have_crcs: dict[str, se
                 g = match_by_name(Path(p.parent / name) if it.inner else p, disc_names[c.key])
                 if g:
                     st.game, st.by_name = g, True
-            if any(x in have_crcs.get(st.console, set()) for x in it.crcs):
-                st.reason = "you have it"
+            if any(x in have_crcs.get(st.console, set()) for x in it.crcs) or                     (st.game and not st.by_name and st.game in (have_games or {}).get(st.console, ())):
+                st.reason = "you have it"      # by checksum, or the same game named by its header in your folder
                 continue
             first = next((seen[(st.console, x)] for x in it.crcs if (st.console, x) in seen), None)
             if first:

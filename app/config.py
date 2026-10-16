@@ -40,6 +40,7 @@ class Settings:
     download_folder: str = ""            # where downloads go ("" = the inbox)
     download_parallel: int = 3           # downloads at the same time
     sort_after_downloads: bool = False   # open Sort inbox when the queue is done
+    quick_check: bool = True             # discs, DS, N64: named by their header (Verify does the full checksum)
     tidy_inbox: bool = True              # after a sort: what you now have -> _Duplicates, empty folders go
     check_updates: bool = True           # look for a new version on GitHub at start (at most once a day)
     last_update_check: float = 0.0
