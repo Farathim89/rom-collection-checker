@@ -124,6 +124,13 @@ class SettingsDialog(QDialog):
         upd = QPushButton("Update all lists now")
         upd.clicked.connect(self._update_lists)
         form.addRow("", upd)
+        ex = parent.extra if parent is not None and hasattr(parent, "extra") else None
+        xl = QPushButton("Get TOSEC, hacks and homebrew lists (about 8 MB)" if ex and not ex.have_any()
+                         else "Update TOSEC, hacks and homebrew lists")
+        xl.setToolTip("A second check for what No-Intro doesn't list: TOSEC (also demos, public domain, translations, "
+                      "hacks), libretro's hacks and homebrew lists - from github.com/libretro/libretro-database")
+        xl.clicked.connect(lambda: self._get_extra(ex))
+        form.addRow("More lists", xl)
         self.auto_update = QCheckBox("Look for a new version of the checker at start (once a day, asks before updating)")
         self.auto_update.setChecked(s.check_updates)
         form.addRow("Updates", self.auto_update)
@@ -156,6 +163,24 @@ class SettingsDialog(QDialog):
             self.s.folders[key] = [d]
             it.setText(f"{BY_KEY[key].name}   →   {d}")
             it.setCheckState(Qt.Checked)
+
+    def _get_extra(self, ex) -> None:
+        if ex is None:
+            return
+        from ..core.extra import AVAILABLE  # noqa: PLC0415
+        todo = [(s, n) for s, names in AVAILABLE.items() for n in names]
+        if QMessageBox.question(self, "More lists", f"Download {len(todo)} lists (about 8 MB of text) from "
+                                "github.com/libretro/libretro-database? Then scan again.") != QMessageBox.Yes:
+            return
+        failed = []
+        for s, n in todo:
+            try:
+                ex.download(s, n)
+            except Exception as e:  # noqa: BLE001
+                failed.append(f"{s}/{n}: {e}")
+        QMessageBox.information(self, "More lists", f"{len(todo) - len(failed)} lists downloaded." +
+                                ("\n\n" + "\n".join(failed[:10]) if failed else ""))
+        self.rescan = True
 
     def _update_lists(self) -> None:
         names = sorted({c.dat for c in CONSOLES if self.dats.have(c.dat)})

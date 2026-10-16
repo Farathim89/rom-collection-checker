@@ -17,6 +17,7 @@ DATS = STATE / "dats"
 UNDO = STATE / "undo"
 CACHE = STATE / "scan-cache.json"
 DOWNLOADS = STATE / "downloads.json"
+EXTRA = STATE / "extra-dats"          # TOSEC / hacks / homebrew lists
 
 
 @dataclass

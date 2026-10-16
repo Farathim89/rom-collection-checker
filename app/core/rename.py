@@ -24,6 +24,11 @@ def make_renames(res: ConsoleResult) -> list[Rename]:
     for label, entries in res.matched.items():
         path = label.split(" › ")[0]
         by_path.setdefault(path, set()).update(e.game for e in entries)
+    # files No-Intro doesn't list, but TOSEC / the hacks list do (not bad dumps): their name there
+    for it in res.others:
+        k = res.known.get(it.label)
+        if k and k.kind != "bad" and it.path not in by_path:
+            by_path.setdefault(it.path, set()).add(k.name)
     taken = set()
     for path, games in by_path.items():
         if len(games) != 1:

@@ -237,3 +237,24 @@ def test_tidy_inbox_moves_what_you_have_and_keeps_the_rest(tmp_path):
     assert not (inbox / "pack").exists()                          # the empty pack folders went
     assert (inbox / "Nintendo" / "NES").is_dir()                  # the drop folder stayed
     assert (inbox / "b [b1].nes").is_file()                       # a bad dump stays in the inbox
+
+
+def test_extra_lists_name_what_no_intro_does_not(tmp_path):
+    from app.core.extra import ExtraStore, kind_of
+    from app.core.rename import make_renames
+    ex = ExtraStore(tmp_path / "extra")
+    (tmp_path / "extra" / "tosec").mkdir(parents=True)
+    hb = b"homebrew game!"
+    (tmp_path / "extra" / "tosec" / "Nintendo - Nintendo Entertainment System.dat").write_text(
+        'game (\n\tname "Cool Demo (1999)(Someone)[tr en Group]"\n'
+        f'\trom ( name "Cool Demo.nes" size {len(hb)} crc {zlib.crc32(hb) & 0xFFFFFFFF:08X} )\n)\n', encoding="utf-8")
+    games = tmp_path / "NES"
+    games.mkdir()
+    (games / "cooldemo.nes").write_bytes(hb)
+    r = scan_console(BY_KEY["nes"], [str(games)], _store(tmp_path), hashing.Tools(), ScanCache(tmp_path / "c.json"), [],
+                     extra=ex)
+    assert not r.unknown                                       # known to TOSEC: not a problem
+    assert r.known[str(games / "cooldemo.nes")].kind == "translation"
+    assert [Path(x.new).name for x in make_renames(r)] == ["Cool Demo (1999)(Someone)[tr en Group].nes"]
+    assert kind_of("tosec", "X (USA)[h title]") == "hack" and kind_of("tosec", "X [o]") == "bad"
+    assert kind_of("tosec", "X (1990)[mapper 4]") == "release"

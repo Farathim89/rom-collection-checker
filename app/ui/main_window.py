@@ -15,10 +15,11 @@ from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QFileDialog, QFrame
                                QTableWidgetItem, QTabWidget, QToolButton, QVBoxLayout, QWidget)
 
 from .. import __version__
-from ..config import CACHE, DATS, Settings, load_settings, save_settings
+from ..config import CACHE, DATS, EXTRA, Settings, load_settings, save_settings
 from ..core.collection import ConsoleResult, ScanCache, find_folders, scan_console, wrong_console
 from ..core.consoles import BY_KEY, CONSOLES
 from ..core.dat import DatStore
+from ..core.extra import ExtraStore
 from ..core.hashing import Tools
 from ..portable import ui_settings
 from . import theme
@@ -118,6 +119,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.s: Settings = load_settings()
         self.dats = DatStore(DATS)
+        self.extra = ExtraStore(EXTRA)
         self.cache = ScanCache(CACHE)
         self.results: dict[str, ConsoleResult] = {}
         self.wrong: list[tuple[str, str, str]] = []
@@ -351,7 +353,7 @@ class MainWindow(QMainWindow):
         v.addWidget(note)
         self.ptabs = QTabWidget()
         self.p_dupes = table(["Console", "Game", "Copies", "Files"], {0: 170, 1: 380, 2: 60}, 3)
-        self.p_unknown = table(["Console", "File", "Looks like"], {0: 170, 1: 700}, 2)
+        self.p_unknown = table(["Console", "File", "Looks like", "Known as (TOSEC / hacks list)"], {0: 170, 1: 600, 2: 110}, 3)
         self.p_wrong = table(["File", "Belongs to", "Game"], {0: 700, 1: 170}, 2)
         self.p_errors = table(["File", "Problem"], {0: 800}, 1)
         for t, name in ((self.p_dupes, "Duplicates"), (self.p_unknown, "Not in No-Intro"),
@@ -609,9 +611,10 @@ class MainWindow(QMainWindow):
                 d_paths.append(sorted(set(fs))[0])
             for it in r.unknown:
                 name = it.inner or Path(it.path).name
-                look = ("bad dump" if re.search(r"\[b\d*\]", name) else "hack" if re.search(r"\[h", name)
-                        else "translation" if re.search(r"\[T[+-]", name) else "")
-                u_rows.append([r.console.name, it.label, look])
+                k = r.known.get(it.label)
+                look = ("bad dump / overdump" if k and k.kind == "bad" else "bad dump" if re.search(r"\[b\d*\]", name)
+                        else "hack" if re.search(r"\[h", name) else "translation" if re.search(r"\[T[+-]", name) else "")
+                u_rows.append([r.console.name, it.label, look, f"{k.source}: {k.name}" if k else ""])
                 u_paths.append(it.path)
             for f, err in r.errors.items():
                 e_rows.append([f, err])
@@ -680,7 +683,7 @@ class MainWindow(QMainWindow):
                     continue
                 w.signals.progress.emit(f"Reading {c.name}…")
                 out[k] = scan_console(c, folders, self.dats, tools, self.cache, self.s.skip_folders,
-                                      w.signals.progress.emit, lambda: w.stop)
+                                      w.signals.progress.emit, lambda: w.stop, extra=self.extra)
                 self.cache.save()
             return out, wrong_console(out, self.dats)
 

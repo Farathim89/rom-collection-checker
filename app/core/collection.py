@@ -119,6 +119,8 @@ class ConsoleResult:
     errors: dict[str, str] = field(default_factory=dict)          # unreadable files
     matched: dict[str, list[Entry]] = field(default_factory=dict)  # item label -> entries it matches
     crcs: set[str] = field(default_factory=set)                   # every CRC variant of every file you have
+    known: dict = field(default_factory=dict)       # item label -> extra.Known (TOSEC / hacks / homebrew)
+    others: list[Item] = field(default_factory=list)  # every file No-Intro doesn't list (also in 0 - folders)
 
     def counts(self, kinds: set[str], scope) -> tuple[int, int]:
         """(titles in scope, titles you have - any version of them counts)."""
@@ -139,8 +141,10 @@ def index(entries: list[Entry]) -> dict[str, list[Entry]]:
 
 
 def scan_console(c: Console, folders: list[str], dats: DatStore, tools: Tools, cache: ScanCache,
-                 skip: list[str], progress=lambda text: None, stop=lambda: False) -> ConsoleResult:
+                 skip: list[str], progress=lambda text: None, stop=lambda: False, extra=None) -> ConsoleResult:
+    """extra: an ExtraStore - files No-Intro doesn't list are looked up in TOSEC / hacks / homebrew too."""
     res = ConsoleResult(c, folders, dats.version(c.dat))
+    known_ix = extra.index(c.dat) if extra is not None else {}
     entries = dats.entries(c.dat)
     ix = index(entries)
     for e in entries:
@@ -170,7 +174,12 @@ def scan_console(c: Console, folders: list[str], dats: DatStore, tools: Tools, c
             res.crcs.update(it.crcs)
             found = [e for crc in it.crcs for e in ix.get(crc, [])]
             if not found:
-                if not COLLECTION.search(str(p)):    # "0 - Homebrew", "0 - Hacks" ...: on purpose, not a problem
+                res.others.append(it)
+                k = next((known_ix[x] for x in it.crcs if x in known_ix), None)
+                if k:
+                    res.known[it.label] = k
+                # a problem: not in a "0 - Homebrew" ... folder (those are on purpose), and not a known good dump
+                if not COLLECTION.search(str(p)) and (k is None or k.kind == "bad"):
                     res.unknown.append(it)
                 continue
             res.matched[it.label] = found
