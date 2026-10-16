@@ -1,0 +1,70 @@
+"""Settings: where your games are, the inbox to sort, which games count, the tools. Saved as settings.json in
+the data folder."""
+from __future__ import annotations
+
+import json
+import os
+from dataclasses import asdict, dataclass, field, fields
+from pathlib import Path
+
+from .core.collection import SKIP_DEFAULT
+from .portable import PORTABLE
+
+STATE: Path = PORTABLE if PORTABLE is not None else \
+    Path(os.environ.get("LOCALAPPDATA") or Path.home()) / "ROMCollectionChecker"
+SETTINGS_FILE = STATE / "settings.json"
+DATS = STATE / "dats"
+UNDO = STATE / "undo"
+CACHE = STATE / "scan-cache.json"
+DOWNLOADS = STATE / "downloads.json"
+
+
+@dataclass
+class Settings:
+    games_root: str = ""                 # e.g. E:\Games  (console folders, also inside maker folders)
+    inbox: str = ""                      # a folder to sort new games out of
+    folders: dict[str, list[str]] = field(default_factory=dict)   # console key -> folders (overrides the search)
+    skip_folders: list[str] = field(default_factory=lambda: list(SKIP_DEFAULT))
+    consoles: list[str] = field(default_factory=list)              # consoles to check ([] = every one found)
+    count_kinds: list[str] = field(default_factory=lambda: ["game"])  # what counts: game, unlicensed, prototype…
+    scope: str = "All"                   # (old setting, read once into regions)
+    regions: list[str] = field(default_factory=lambda: ["USA", "Europe", "Japan", "Other"])  # the ones shown
+    unpack: bool = True                  # take ROMs out of zips when sorting (not DS: emulators read .7z)
+    official_names: bool = True          # sorted games get their No-Intro name
+    take_hacks: bool = False             # hacks are sorted in too (translations always are)
+    take_unknown: bool = True            # dumps No-Intro doesn't list (homebrew, translations, multicarts)
+    sevenzip: str = ""                   # 7z.exe / 7za.exe (found by itself when empty)
+    winrar_dir: str = ""                 # WinRAR's folder (found by itself when empty)
+    download_folder: str = ""            # where downloads go ("" = the inbox)
+    download_parallel: int = 3           # downloads at the same time
+    sort_after_downloads: bool = False   # open Sort inbox when the queue is done
+    theme: str = "Gold (dark)"
+
+
+def guess_games_root() -> str:
+    for p in (r"D:\Games", r"E:\Games", r"D:\ROMs", r"E:\ROMs"):
+        if Path(p).is_dir():
+            return p
+    return ""
+
+
+def load_settings(path: Path = SETTINGS_FILE) -> Settings:
+    s = Settings()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        s.games_root = guess_games_root()
+        if s.games_root and (Path(s.games_root) / "_unsorted").is_dir():
+            s.inbox = str(Path(s.games_root) / "_unsorted")
+        return s
+    for f in fields(Settings):
+        if f.name in data:
+            setattr(s, f.name, data[f.name])
+    if "regions" not in data and s.scope in ("USA", "Europe", "Japan", "Other"):
+        s.regions = [s.scope]
+    return s
+
+
+def save_settings(s: Settings, path: Path = SETTINGS_FILE) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(asdict(s), ensure_ascii=False, indent=1), encoding="utf-8")
