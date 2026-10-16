@@ -142,6 +142,7 @@ def make_plan(inbox: str, folders: dict[str, list[str]], have_crcs: dict[str, se
               take_unknown_dumps=True, progress=lambda t: None, stop=lambda: False) -> Plan:
     """have_crcs: console key -> every CRC variant of the games you already have."""
     plan = Plan(inbox)
+    _DATS_FOR_BIG[:] = [dats]
     ixs = {c.key: index(dats.entries(c.dat)) for c in CONSOLES if dats.have(c.dat)}
     owned: dict[str, set[str]] = {}             # console -> titles you have (for dumps No-Intro doesn't know)
     for key, have in have_crcs.items():
@@ -169,7 +170,15 @@ def make_plan(inbox: str, folders: dict[str, list[str]], have_crcs: dict[str, se
         if any(ARCADE.search(part) for part in rel):
             plan.steps.append(Step(str(p), reason="arcade (not checked)"))
             continue
-        # images that can't match a checksum (trimmed .wbfs, .pbp, .cso …) aren't read whole: their header names them
+        # images that can't match a checksum (trimmed .wbfs, .pbp, .cso …) aren't read whole: their header names them;
+        # a big disc image (> 1 GB) too, when its header names it (Xbox 360 / PS2 / Wii …: seconds instead of minutes)
+        quick = _big_disc(p, folder_hint=console_from_folders(p, Path(inbox), list(CONSOLES)))
+        if quick:
+            key, game, size = quick
+            st = Step(str(p), "", console=key, game=game, by_header=True)
+            plan.steps.append(st)
+            _decide(st, p.name, p.suffix.lower(), have_games, seen_games, folders, games_root, official_names)
+            continue
         items, err = file_items(p, tools, all_exts - set(ARCHIVES), NO_CHECKSUM)
         if err or not items:
             plan.steps.append(Step(str(p), reason="unreadable" if err else "no game inside"))
@@ -264,6 +273,52 @@ def make_plan(inbox: str, folders: dict[str, list[str]], have_crcs: dict[str, se
             st.target = str(dest / (SAFE.sub("_", base) + ext.lower()))
     _join_discs(plan, folders, games_root, official_names)
     return plan
+
+
+_SERIALS: dict[str, dict] = {}
+_DATS_FOR_BIG: list = []
+
+
+def _big_disc(p: Path, folder_hint=None) -> tuple[str, str, int] | None:
+    """(console, game, size) for a disc image over 1 GB that its header names (no checksum read)."""
+    try:
+        size = p.stat().st_size
+    except OSError:
+        return None
+    ext = p.suffix.lower().lstrip(".")
+    if size < 1 << 30 or ext not in ("iso", "gcm", "bin", "img") or not _DATS_FOR_BIG:
+        return None
+    dats = _DATS_FOR_BIG[0]
+    keys = [k for k in QUICK_CONSOLES if ext in BY_KEY[k].exts and dats.have(BY_KEY[k].dat)]
+    if folder_hint is not None and folder_hint.key in keys:
+        keys = [folder_hint.key] + [k for k in keys if k != folder_hint.key]
+    for key in keys:
+        pr = probe(p, key)
+        if not pr:
+            continue
+        if key not in _SERIALS:
+            _SERIALS[key] = serial_index(dats.entries(BY_KEY[key].dat))
+        g = identify(pr, _SERIALS[key], p, size)[0]
+        if g:
+            return key, g, size
+    return None
+
+
+def _decide(st: Step, name: str, ext: str, have_games, seen_games, folders, games_root, official_names) -> None:
+    """A disc named by its header: you have it, the same as another file here, or move it in."""
+    if st.game in (have_games or {}).get(st.console, ()):
+        st.reason = "you have it"
+        return
+    first = seen_games.get((st.console, st.game))
+    if first:
+        st.reason = "same as another file here"
+        return
+    seen_games[(st.console, st.game)] = st.label
+    c = BY_KEY[st.console]
+    dest = Path((folders.get(c.key) or [str(Path(games_root) / c.maker / c.folders[0])])[0])
+    base = st.game if official_names else Path(name).stem
+    st.action, st.reason = "move", "new (identified by header)"
+    st.target = str(dest / (SAFE.sub("_", base) + ext))
 
 
 DESCRIPTORS = ("cue", "gdi", "m3u", "ccd", "sub", "img", "mds")

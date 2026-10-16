@@ -197,7 +197,8 @@ def _zip_items(path: Path, rom_exts: set[str]) -> list[Item]:
     return out
 
 
-PLAIN_EXTS = {"nds", "dsi", "gba", "gb", "gbc", "z64", "iso", "vb", "ws", "wsc", "ngp", "ngc", "a26"}   # never headered
+PLAIN_EXTS = {"nds", "dsi", "gba", "gb", "gbc", "z64", "iso", "vb", "ws", "wsc", "ngp", "ngc", "a26",   # never headered
+              "wbfs", "rvz", "gcz", "cso", "chd", "pbp", "cdi", "nsp", "nsz", "xci"}   # (disc images: read from the index)
 
 
 def _listed_items(path: Path, tools: Tools, rom_exts: set[str]) -> list[Item] | None:

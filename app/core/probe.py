@@ -214,6 +214,45 @@ def _xbox(p: Path) -> Probe | None:
     return None
 
 
+def _xdvdfs_file(f, name: bytes, bases=(0, 0x2080000, 0xFD90000, 0x18300000)) -> tuple[int, int] | None:
+    """(partition base, file offset) of a root file on an Xbox / Xbox 360 disc (XDVDFS)."""
+    for base in bases:
+        f.seek(base + 0x10000)
+        vd = f.read(0x800)
+        if not vd.startswith(b"MICROSOFT*XBOX*MEDIA"):
+            continue
+        root, size = struct.unpack_from("<II", vd, 0x14)
+        f.seek(base + root * 2048)
+        d = f.read(min(size, 1 << 20))
+        i = d.lower().find(name)
+        if i >= 14:
+            return base, base + struct.unpack_from("<I", d, i - 10)[0] * 2048
+    return None
+
+
+def _xbox360(p: Path) -> Probe | None:
+    """default.xex on an Xbox 360 disc (XGD2 / XGD3 image, or a repacked one): its execution info has the title ID
+    (0x4D5309C9 = Redump's MS-2505), the version and the disc number."""
+    with open(p, "rb") as f:
+        hit = _xdvdfs_file(f, b"default.xex")
+        if not hit:
+            return None
+        f.seek(hit[1])
+        x = f.read(0x3000)
+        if x[:4] != b"XEX2":
+            return None
+        count, = struct.unpack_from(">I", x, 0x14)
+        for k in range(min(count, 64)):
+            key, val = struct.unpack_from(">II", x, 0x18 + k * 8)
+            if key == 0x00040006 and val + 24 <= len(x):      # execution info
+                _media, version, _base, tid = struct.unpack_from(">IIII", x, val)
+                disc = x[val + 18]
+                pub = bytes([(tid >> 24) & 0xFF, (tid >> 16) & 0xFF]).decode("latin1")
+                if re.fullmatch(r"[A-Z0-9]{2}", pub):
+                    return Probe(f"{pub}{tid & 0xFFFF:03d}", version=version, disc=max(0, disc - 1))
+    return None
+
+
 def probe(p: Path, console: str, dolphin: str = "") -> Probe | None:
     """The game's ID (and version) from its header, or None when it can't be read that way."""
     ext = p.suffix.lower().lstrip(".")
@@ -236,6 +275,8 @@ def probe(p: Path, console: str, dolphin: str = "") -> Probe | None:
             return _ps3(p)
         if console == "xbox" and ext == "iso":
             return _xbox(p)
+        if console == "x360" and ext == "iso":
+            return _xbox360(p)
         if console == "saturn" and ext in ("bin", "iso", "img"):
             return _saturn(p)
         if console == "nds" and ext == "nds":
@@ -257,7 +298,7 @@ def probe(p: Path, console: str, dolphin: str = "") -> Probe | None:
     return None
 
 
-QUICK_CONSOLES = ("ps1", "ps2", "ps3", "psp", "gc", "wii", "saturn", "xbox", "nds", "n64")
+QUICK_CONSOLES = ("ps1", "ps2", "ps3", "psp", "gc", "wii", "saturn", "xbox", "x360", "nds", "n64")
 REGION_LETTERS = {"E": ("USA", "Canada", "World"), "P": ("Europe", "World", "Australia", "UK"), "J": ("Japan",),
                   "D": ("Germany", "Europe"), "F": ("France", "Europe"), "S": ("Spain", "Europe"), "I": ("Italy", "Europe"),
                   "U": ("Australia", "Europe"), "K": ("Korea",), "W": ("Taiwan", "Asia"), "X": ("Europe",), "Y": ("Europe",)}
