@@ -392,7 +392,7 @@ class UndoDialog(QDialog):
         self.resize(700, 420)
         v = QVBoxLayout(self)
         v.addWidget(QLabel("Sorts and renames, newest first. Undo puts the files back where they were "
-                           "(copies taken out of archives go to the Recycle Bin)."))
+                           "(copies taken out of archives go to the Recycle Bin, or to undo\removed copies on a drive without one)."))
         self.list = QListWidget()
         logs = sorted([p for p in UNDO.glob("*.json") if not p.name.endswith(".undone.json")], reverse=True) \
             if UNDO.is_dir() else []
