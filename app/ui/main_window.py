@@ -350,7 +350,7 @@ class MainWindow(QMainWindow):
         self.cover.setFixedSize(380, 280)
         self.cover.setAlignment(Qt.AlignCenter)
         v.addWidget(self.cover)
-        v.addWidget(QLabel("Versions (No-Intro)"))
+        v.addWidget(QLabel("Versions (from the list)"))
         self.versions = QListWidget()
         self.versions.itemDoubleClicked.connect(lambda it: (f := it.data(Qt.UserRole)) and open_folder_of(f))
         v.addWidget(self.versions, 1)
@@ -413,7 +413,8 @@ class MainWindow(QMainWindow):
         found = self.folders()
         tot_all = have_all = empty = 0
         maker = ""
-        for c in CONSOLES:                 # grouped by maker: NINTENDO, SEGA, NEC, ATARI ...
+        makers = list(dict.fromkeys(c.maker for c in CONSOLES))
+        for c in sorted(CONSOLES, key=lambda x: makers.index(x.maker)):   # one group per maker: NINTENDO, SEGA …
             if c.key not in found:
                 continue
             r = self.results.get(c.key)
@@ -476,6 +477,8 @@ class MainWindow(QMainWindow):
         elif key == "homebrew":
             self.pages.setCurrentIndex(4)
         elif key:
+            from ..core.probe import QUICK_CONSOLES  # noqa: PLC0415
+            self.b_verify.setVisible(key in QUICK_CONSOLES)     # Switch files are encrypted: nothing to verify
             self.pages.setCurrentIndex(1)
             self.fill_games()
 
@@ -578,7 +581,8 @@ class MainWindow(QMainWindow):
             by_head = bool(mine) and not by_name and all(lb in r.identified for lb in mine)
             it = QListWidgetItem(("≈  " if by_name else "◇  " if by_head else "✓  " if mine else "✗  ") + g
                                  + ("" if e.kind == "game" else f"   [{e.kind}]") + ("   (by name)" if by_name else "")
-                                 + ("   (identified - Verify checks it)" if by_head else ""))
+                                 + (("   (by title ID)" if r.console.source == "titledb" else "   (identified - Verify checks it)")
+                                    if by_head else ""))
             it.setForeground(QColor(p.ready if mine else p.muted))
             if mine:
                 it.setData(Qt.UserRole, mine[0])
@@ -608,15 +612,20 @@ class MainWindow(QMainWindow):
             it.setFlags(Qt.NoItemFlags)
             self.versions.addItem(it)
         best = next((g for g in ti.games if g in ti.have), None) or next(iter(ti.games))
-        self.load_cover(r.console.dat, best)
+        if r.console.source == "titledb":           # Switch: the game's eShop icon from titledb
+            from ..core import switch  # noqa: PLC0415
+            self._switch_extra = getattr(self, "_switch_extra", None) or switch.load_extra(DATS)
+            self.load_cover(r.console.dat, best, url=self._switch_extra.get("icons", {}).get(ti.games[best][0].serial, ""))
+        else:
+            self.load_cover(r.console.dat, best)
 
-    def load_cover(self, dat: str, game: str) -> None:
+    def load_cover(self, dat: str, game: str, url: str = "") -> None:
         self.cover.setText("…")
         self.cover.setPixmap(QPixmap())
         if self._cover_reply is not None:
             self._cover_reply.abort()
         name = re.sub(r'[&*/:`<>?\\|"]', "_", game)
-        url = THUMBS.format(urllib.parse.quote(dat), urllib.parse.quote(name))
+        url = url or THUMBS.format(urllib.parse.quote(dat), urllib.parse.quote(name))
         reply = self._cover_reply = self.net.get(QNetworkRequest(QUrl(url)))
 
         def done() -> None:

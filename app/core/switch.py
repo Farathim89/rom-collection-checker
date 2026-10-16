@@ -74,12 +74,15 @@ def build(titledb: Path, dats: Path) -> int:
     names, newest update of each game). Returns the number of games."""
     titles = json.loads((titledb / "US.en.json").read_text(encoding="utf-8"))
     versions = json.loads((titledb / "versions.json").read_text(encoding="utf-8"))
-    games, extra = {}, {"names": {}, "latest": {}}
+    games, extra = {}, {"names": {}, "latest": {}, "icons": {}}
     for t in titles.values():
         tid, name = (t.get("id") or "").upper(), _TM.sub("", t.get("name") or "").strip()
         if not re.fullmatch(r"0100[0-9A-F]{12}", tid) or not name:
             continue
         n = int(tid, 16)
+        icon = t.get("iconUrl") or t.get("bannerUrl")
+        if icon and icon != "None" and kind(n) == "base":
+            extra["icons"][tid] = icon
         if kind(n) == "base":
             demo = str(t.get("isDemo")) == "True" or re.search(r"\bdemo\b", name, re.I)
             games[tid] = (name, demo, int(t.get("size") or 0) if str(t.get("size") or "").isdigit() else 0,
