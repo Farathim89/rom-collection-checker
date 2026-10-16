@@ -54,6 +54,7 @@ Mega-CD, Dreamcast, Xbox / 360, CD-i, PC Engine CD, PC-FX, 3DO, Amiga CD32 and C
 - `.iso` and `.bin` tracks by checksum; one `.bin` with all tracks merged is checked by its first (data) track.
 - `.rvz` / `.wbfs` / `.gcz` through Dolphin's `DolphinTool.exe` (found by itself, or set in Settings).
 - `.cdi`, `.pbp`, `.cso`, `.chd` and repacked Xbox images can only be matched by name - shown as *by name*.
+- **Quick check** (on by default): discs, DS and N64 games are named by their header - the serial and revision, a few KB per file - so a scan takes seconds; they are marked ◇ *identified*. **Verify** on a console page does the full checksum check. `.7z` archives are checked from their own index, without unpacking. PS3 game folders are named by their `PARAM.SFO`.
 - Sort inbox moves a disc of several files (`.cue` / `.gdi` + tracks) as one into `<console>\<Redump name>\`.
 
 ## Download
