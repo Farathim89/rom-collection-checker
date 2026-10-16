@@ -18,7 +18,7 @@ the sister of [Book Collection Checker](https://github.com/Farathim89/book-colle
   compared with what you have and gets a plan - *move it in*, or leave it (*you have it*, *bad dump*, *hack*,
   *unknown console*). ROMs are taken out of their archives (not Nintendo DS: emulators read `.7z`) and can get their
   No-Intro name. Nothing moves until you press Apply; every sort can be undone.
-  - Packs are read by their folder names too (`Atari 2600oms`, `Sega 32X`), arcade sets (MAME, Neo Geo) are set
+  - Packs are read by their folder names too (`Atari 2600\roms`, `Sega 32X`), arcade sets (MAME, Neo Geo) are set
     aside, and other dumps of a game you already have stay in the inbox.
   - *Make console folders* adds empty `Maker\Console` folders to the inbox, laid out like your collection: a game you
     drop in one is sorted to that console.
@@ -27,8 +27,18 @@ the sister of [Book Collection Checker](https://github.com/Farathim89/book-colle
   there. Optionally the inbox is sorted when all are done. It downloads the links you give it - it doesn't search.
 - **Clean names** - known dumps get their official No-Intro name (`smb.nes` → `Super Mario Bros. (World).nes`),
   with a preview and undo.
+- **Free homebrew** - browse [Homebrew Hub](https://hh.gbdev.io)'s ~1,600 free games, demos and music for Game Boy,
+  Game Boy Color, Game Boy Advance and NES (shared by their authors), with screenshots and licenses, and download them
+  into `<console folder>\0 - Homebrew`.
 - **Problems** - duplicates, files No-Intro doesn't know (bad dumps, hacks, translations), games in the wrong console
   folder, unreadable archives.
+
+A `0 - Name` folder in a console folder (`0 - Homebrew`, `0 - Translations`, `0 - Randomizer`) is a collection of
+its own: games No-Intro doesn't know are expected there, so they are not listed as problems
+([MediaDeck](https://github.com/Farathim89/MediaDeck) shows each as a tab).
+
+Nothing is ever deleted for good: what you remove goes to the Recycle Bin. On a drive whose Recycle Bin is off the
+checker refuses, and Undo parks copies in `RomChecker-data\undo\removed copies` instead.
 
 Console folders are found by themselves in your games folder (also inside maker folders like `Nintendo\SNES`), or
 chosen per console in Settings. Cartridge consoles: NES, Famicom Disk System, SNES, N64, Game Boy / Color / Advance,
