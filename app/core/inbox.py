@@ -102,6 +102,30 @@ def make_console_folders(inbox: str, folders: dict[str, list[str]], games_root: 
     return made
 
 
+def letter_folder(dest: Path, name: str) -> Path:
+    """A console folder laid out in A-Z letter folders (and 0 for digits / signs): the game's letter folder."""
+    letters = [d.name for d in dest.iterdir() if d.is_dir() and len(d.name) == 1] if dest.is_dir() else []
+    if sum(1 for n in letters if n.isalpha()) < 3:
+        return dest
+    first = name[:1].upper()
+    if first.isascii() and first.isalpha():
+        return dest / first
+    return dest / next((n for n in letters if not n.isalpha()), "0")
+
+
+def place(dest: Path, filename: str, folder: bool = False) -> str:
+    """Where a game goes: its letter folder, and its own folder too when the games there each have one
+    (Wii / GameCube: L/Game/Game.wbfs). folder: the target is a folder already (a disc of several files)."""
+    d = letter_folder(dest, filename)
+    if not folder and d.is_dir():
+        ext = Path(filename).suffix.lower()
+        subs = [q for q in d.iterdir() if q.is_dir() and not q.name.startswith(("0 - ", "_"))]
+        if subs and not any(q.is_file() and q.suffix.lower() == ext for q in d.iterdir()) and any(
+                r.suffix.lower() == ext for q in subs[:20] for r in q.iterdir() if r.is_file()):
+            d = d / Path(filename).stem
+    return str(d / filename)
+
+
 @dataclass
 class Step:
     source: str                 # the file in the inbox
@@ -270,7 +294,7 @@ def make_plan(inbox: str, folders: dict[str, list[str]], have_crcs: dict[str, se
                 base, ext = Path(name).stem, Path(name).suffix
             if st.game and official_names:
                 base = st.game
-            st.target = str(dest / (SAFE.sub("_", base) + ext.lower()))
+            st.target = place(dest, SAFE.sub("_", base) + ext.lower())
     _join_discs(plan, folders, games_root, official_names)
     return plan
 
@@ -318,7 +342,7 @@ def _decide(st: Step, name: str, ext: str, have_games, seen_games, folders, game
     dest = Path((folders.get(c.key) or [str(Path(games_root) / c.maker / c.folders[0])])[0])
     base = st.game if official_names else Path(name).stem
     st.action, st.reason = "move", "new (identified by header)"
-    st.target = str(dest / (SAFE.sub("_", base) + ext))
+    st.target = place(dest, SAFE.sub("_", base) + ext)
 
 
 DESCRIPTORS = ("cue", "gdi", "m3u", "ccd", "sub", "img", "mds")
@@ -354,16 +378,16 @@ def _join_discs(plan: Plan, folders: dict[str, list[str]], games_root: str, offi
                         (Path(lead.source).stem if lead.inner else disc_base(lead.source)))
         if lead.inner:
             if len(steps) > 1 or Path(lead.inner).suffix.lower().lstrip(".") in ("bin", "raw"):
-                lead.unpack_all, lead.target = True, str(dest / name)
+                lead.unpack_all, lead.target = True, place(dest, name, folder=True)
         else:
             src_dir = Path(lead.source).parent
             files = sorted({s.source for s in steps} | {
                 str(q) for q in src_dir.iterdir() if q.is_file() and q.suffix.lower().lstrip(".") in DESCRIPTORS
                 and disc_base(q.name).lower() == base})
             if len(files) > 1:
-                lead.files, lead.target = files, str(dest / name)
+                lead.files, lead.target = files, place(dest, name, folder=True)
             else:
-                lead.target = str(dest / (name + Path(lead.source).suffix.lower()))
+                lead.target = place(dest, name + Path(lead.source).suffix.lower())
         lead.game = game or lead.game
         for s in steps:
             if s is not lead:
