@@ -49,6 +49,10 @@ chosen per console in Settings. Cartridge consoles: NES, Famicom Disk System, SN
 Nintendo DS, Virtual Boy, Master System, Game Gear, SG-1000, Mega Drive, 32X, PC Engine, Atari 2600 / 5200 / 7800 /
 Lynx, WonderSwan / Color, Neo Geo Pocket / Color, ColecoVision, MSX / MSX2.
 
+**Nintendo Switch**: games are named by the title ID in their file names (the files are encrypted) and counted against
+[titledb](https://github.com/blawar/titledb) (US eShop). Updates and DLC are shown with their game, and Problems →
+*Switch updates* lists the games whose update is older than the newest.
+
 **Disc consoles** are checked against [Redump](http://redump.org): PlayStation 1 / 2 / 3, PSP, GameCube, Wii, Saturn,
 Mega-CD, Dreamcast, Xbox / 360, CD-i, PC Engine CD, PC-FX, 3DO, Amiga CD32 and CDTV.
 - `.iso` and `.bin` tracks by checksum; one `.bin` with all tracks merged is checked by its first (data) track.
