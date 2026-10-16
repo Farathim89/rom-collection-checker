@@ -138,7 +138,7 @@ class SettingsDialog(QDialog):
                                "the Verify button on a console does the full checksum check")
         self.quick.setChecked(s.quick_check)
         form.addRow("Quick check", self.quick)
-        self.auto_update = QCheckBox("Look for a new version of the checker at start (once a day, asks before updating)")
+        self.auto_update = QCheckBox("Look for a new version of the checker at every start (asks before updating)")
         self.auto_update.setChecked(s.check_updates)
         form.addRow("Updates", self.auto_update)
         chk = QPushButton("Check for updates now")

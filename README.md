@@ -71,7 +71,7 @@ No install, no Python. Windows 10/11. SmartScreen may warn because the exe isn't
 The No-Intro lists (a few MB of text) come from [libretro-database](https://github.com/libretro/libretro-database);
 the app asks before downloading them. For `.7z` it uses 7-Zip (or WinRAR), for `.rar` WinRAR - found by themselves.
 
-The checker updates itself: at start (once a day) it asks GitHub for a newer version and asks before updating;
+The checker updates itself: at every start it asks GitHub for a newer version and asks before updating;
 `ROMCollectionChecker.exe --update` updates straight away.
 
 ## From source

@@ -856,7 +856,7 @@ class MainWindow(QMainWindow):
         import time  # noqa: PLC0415
         from ..core import update  # noqa: PLC0415
         if not manual and (not self.s.check_updates or not update.can_update()
-                           or time.time() - self.s.last_update_check < 20 * 3600):
+                           or time.time() - self.s.last_update_check < 3600):   # every start (at most hourly)
             return
         if manual and not update.can_update():
             QMessageBox.information(self, "Updates", "Updates are for the built ROMCollectionChecker.exe - "

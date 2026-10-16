@@ -44,7 +44,7 @@ class Settings:
     sort_after_downloads: bool = False   # open Sort inbox when the queue is done
     quick_check: bool = True             # discs, DS, N64: named by their header (Verify does the full checksum)
     tidy_inbox: bool = True              # after a sort: what you now have -> _Duplicates, empty folders go
-    check_updates: bool = True           # look for a new version on GitHub at start (at most once a day)
+    check_updates: bool = True           # look for a new version on GitHub at every start (at most hourly)
     last_update_check: float = 0.0
     theme: str = "Gold (dark)"
 
