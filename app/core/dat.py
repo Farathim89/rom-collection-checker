@@ -64,10 +64,11 @@ class Entry:
         out = set()
         for r in self.regions:
             k = REGION_OF.get(r, "Other")
-            out.add(k)
             if k == "World":
                 out.update(REGION_KEYS)
-            elif k == "Europe":
+                continue
+            out.add(k)
+            if k == "Europe":
                 out.update(EUROPE_KEYS)
         return out or {"Other"}
 
