@@ -11,7 +11,7 @@ import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from .collection import index, walk_files
+from .collection import _TRACK, index, match_by_name, name_index, walk_files
 from .consoles import ARCHIVES, BY_KEY, CONSOLES, Console, consoles_for_ext
 from .dat import DatStore
 from .hashing import Tools, file_items
@@ -111,6 +111,9 @@ class Step:
     unpack: bool = False        # take the ROM out of its archive
     enabled: bool = True
     done: bool = False          # set by apply_plan when the game is in the collection
+    files: list[str] = field(default_factory=list)   # a disc of several files (.cue + tracks): all move into target
+    unpack_all: bool = False    # a disc in an archive: everything in it goes into the target folder
+    by_name: bool = False       # a disc recognised by its name only
 
     @property
     def label(self) -> str:
@@ -142,6 +145,7 @@ def make_plan(inbox: str, folders: dict[str, list[str]], have_crcs: dict[str, se
     all_exts = {e for c in CONSOLES for e in c.exts} | set(ARCHIVES)
     files = walk_files([inbox], all_exts, [])
     seen: dict[tuple[str, str], str] = {}       # (console, crc) -> first inbox file with it
+    disc_names: dict[str, dict[str, str]] = {}   # console -> Redump name index (for discs matched by name)
     for n, p in enumerate(files, 1):
         if stop():
             break
@@ -189,6 +193,13 @@ def make_plan(inbox: str, folders: dict[str, list[str]], have_crcs: dict[str, se
                 st.reason = "unknown console"
                 continue
             c = BY_KEY[st.console]
+            ext = Path(name).suffix.lower().lstrip(".")
+            if not st.game and c.source == "redump" and (ext in c.name_only or ext in c.name_fallback or not it.crcs):
+                if c.key not in disc_names:
+                    disc_names[c.key] = name_index(dats.entries(c.dat))
+                g = match_by_name(Path(p.parent / name) if it.inner else p, disc_names[c.key])
+                if g:
+                    st.game, st.by_name = g, True
             if any(x in have_crcs.get(st.console, set()) for x in it.crcs):
                 st.reason = "you have it"
                 continue
@@ -211,8 +222,9 @@ def make_plan(inbox: str, folders: dict[str, list[str]], have_crcs: dict[str, se
                 if not take_unknown_dumps:
                     st.reason = "not in No-Intro"
                     continue
-            st.action, st.reason = "move", "new" if st.game else ("translation" if TRANSLATION.search(name)
-                                                                    else "new (not in No-Intro)")
+            not_in = "new (not in Redump)" if c.source == "redump" else "new (not in No-Intro)"
+            st.action, st.reason = "move", ("new (by name)" if st.by_name else "new") if st.game else (
+                "translation" if TRANSLATION.search(name) else not_in)
             dest = Path((folders.get(c.key) or [str(Path(games_root) / c.maker / c.folders[0])])[0])
             if c.keep_archives and it.inner and len(items) == 1:   # one game per archive: it stays packed
                 st.unpack = False
@@ -223,7 +235,58 @@ def make_plan(inbox: str, folders: dict[str, list[str]], have_crcs: dict[str, se
             if st.game and official_names:
                 base = st.game
             st.target = str(dest / (SAFE.sub("_", base) + ext.lower()))
+    _join_discs(plan, folders, games_root, official_names)
     return plan
+
+
+DESCRIPTORS = ("cue", "gdi", "m3u", "ccd", "sub", "img", "mds")
+
+
+def disc_base(name: str) -> str:
+    """"Sonic Adventure (USA) (Track 2).bin" -> "Sonic Adventure (USA)"."""
+    return _TRACK.sub("", Path(name).stem).strip()
+
+
+def _join_discs(plan: Plan, folders: dict[str, list[str]], games_root: str, official_names: bool) -> None:
+    """A disc of several files (.cue / .gdi + its tracks) is one move into <console>\\<name>\\ (the track names stay:
+    the .cue points at them); a disc in an archive is unpacked whole into that folder."""
+    groups: dict[tuple[str, str, str], list[Step]] = {}
+    for st in plan.steps:
+        if st.console and BY_KEY[st.console].source == "redump" and st.reason != "unknown console":
+            key = (st.source.lower(), "", st.console) if st.inner else                 (str(Path(st.source).parent).lower(), disc_base(st.source).lower(), st.console)
+            groups.setdefault(key, []).append(st)
+    for (_where, base, key), steps in groups.items():
+        c = BY_KEY[key]
+        if any(s.reason in ("you have it", "same as another file here") for s in steps):
+            for s in steps:                    # one known track = you have this disc
+                s.action, s.target = "leave", ""
+                if s.reason not in ("you have it", "same as another file here"):
+                    s.reason = "you have it"
+            continue
+        lead = next((s for s in steps if s.action == "move"), None)
+        if lead is None:
+            continue
+        game = next((s.game for s in steps if s.game and not s.by_name), "") or next((s.game for s in steps if s.game), "")
+        dest = Path((folders.get(key) or [str(Path(games_root) / c.maker / c.folders[0])])[0])
+        name = SAFE.sub("_", game if game and official_names else
+                        (Path(lead.source).stem if lead.inner else disc_base(lead.source)))
+        if lead.inner:
+            if len(steps) > 1 or Path(lead.inner).suffix.lower().lstrip(".") in ("bin", "raw"):
+                lead.unpack_all, lead.target = True, str(dest / name)
+        else:
+            src_dir = Path(lead.source).parent
+            files = sorted({s.source for s in steps} | {
+                str(q) for q in src_dir.iterdir() if q.is_file() and q.suffix.lower().lstrip(".") in DESCRIPTORS
+                and disc_base(q.name).lower() == base})
+            if len(files) > 1:
+                lead.files, lead.target = files, str(dest / name)
+            else:
+                lead.target = str(dest / (name + Path(lead.source).suffix.lower()))
+        lead.game = game or lead.game
+        for s in steps:
+            if s is not lead:
+                s.action, s.target, s.reason = "leave", "", "part of the disc above"
+                s.enabled = False
 
 
 def apply_plan(plan: Plan, tools: Tools, undo_dir: Path, progress=lambda t: None) -> tuple[int, list[str], Path]:
@@ -242,6 +305,25 @@ def apply_plan(plan: Plan, tools: Tools, undo_dir: Path, progress=lambda t: None
             continue
         try:
             t.parent.mkdir(parents=True, exist_ok=True)
+            if s.files:                      # a disc of several files: all of them into its folder
+                t.mkdir(parents=True)
+                for f in s.files:
+                    if Path(f).exists():
+                        shutil.move(f, t / Path(f).name)
+                        done.append({"op": "moved", "from": f, "to": str(t / Path(f).name)})
+                s.done = True
+                targets.add(str(t).lower())
+                continue
+            if s.inner and s.unpack_all:     # a disc in an archive: everything in it into its folder
+                t.mkdir(parents=True)
+                if not tools.extract_all(Path(s.source), t):
+                    problems.append(f"could not unpack: {s.source}")
+                    continue
+                for q in sorted(t.iterdir()):
+                    done.append({"op": "created", "path": str(q)})
+                s.done = True
+                targets.add(str(t).lower())
+                continue
             if s.inner and s.unpack:
                 if s.source not in unpacked:
                     tmp = Path(work.name) / str(len(unpacked))

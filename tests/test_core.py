@@ -302,3 +302,36 @@ def test_merged_disc_image_and_sibling_tracks(tmp_path):
     r = scan_console(BY_KEY["ps1"], [str(games)], dat.DatStore(d), hashing.Tools(), ScanCache(tmp_path / "c.json"), [])
     assert r.counts({"game"}, "All") == (2, 2)
     assert not r.unknown                                  # the other track belongs to its matched disc
+
+
+def test_sort_a_disc_with_its_cue_and_tracks(tmp_path):
+    from app.core.inbox import apply_plan, tidy_inbox
+    t1, t2 = b"SATURN DATA" * 300, b"CD AUDIO" * 200
+    crc = lambda b: f"{zlib.crc32(b) & 0xFFFFFFFF:08X}"  # noqa: E731
+    d = tmp_path / "dats"
+    d.mkdir()
+    (d / "Sega - Saturn.dat").write_text(
+        'game (\n\tname "Disc Game (Europe)"\n'
+        f'\trom ( name "Disc Game (Europe) (Track 1).bin" size {len(t1)} crc {crc(t1)} )\n'
+        f'\trom ( name "Disc Game (Europe) (Track 2).bin" size {len(t2)} crc {crc(t2)} )\n)\n', encoding="utf-8")
+    (d / "Sega - Dreamcast.dat").write_text('game (\n\tname "Name Game (USA)"\n\trom ( name "x.bin" size 1 crc 00000001 )\n)\n',
+                                           encoding="utf-8")
+    root = tmp_path / "games"
+    inbox = root / "_unsorted" / "pack"
+    inbox.mkdir(parents=True)
+    (inbox / "Disc Game (Europe) (Track 1).bin").write_bytes(t1)
+    (inbox / "Disc Game (Europe) (Track 2).bin").write_bytes(t2)
+    (inbox / "Disc Game (Europe).cue").write_text('FILE "Disc Game (Europe) (Track 1).bin" BINARY\n')
+    (inbox / "Name Game (USA).cdi").write_bytes(b"discjuggler image")
+    saturn, dc = root / "Sega" / "Sega Saturn", root / "Sega" / "Sega Dreamcast"
+    plan = make_plan(str(root / "_unsorted"), {"saturn": [str(saturn)], "dc": [str(dc)]}, {}, dat.DatStore(d),
+                     hashing.Tools(), str(root))
+    moves = [s for s in plan.steps if s.action == "move"]
+    assert len(moves) == 2 and sorted(s.reason for s in moves) == ["new", "new (by name)"]
+    n, problems, _ = apply_plan(plan, hashing.Tools(), tmp_path / "undo")
+    assert not problems
+    assert sorted(p.name for p in (saturn / "Disc Game (Europe)").iterdir()) == [
+        "Disc Game (Europe) (Track 1).bin", "Disc Game (Europe) (Track 2).bin", "Disc Game (Europe).cue"]
+    assert (dc / "Name Game (USA).cdi").is_file()
+    tidy_inbox(plan, str(root), tmp_path / "undo")
+    assert not (root / "_unsorted" / "pack").exists()
