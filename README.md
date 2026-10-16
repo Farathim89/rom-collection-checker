@@ -59,7 +59,7 @@ Mega-CD, Dreamcast, Xbox / 360, CD-i, PC Engine CD, PC-FX, 3DO, Amiga CD32 and C
 - `.rvz` / `.wbfs` / `.gcz` through Dolphin's `DolphinTool.exe` (found by itself, or set in Settings).
 - `.cdi`, `.pbp`, `.cso`, `.chd` and repacked Xbox images can only be matched by name - shown as *by name*.
 - **Quick check** (on by default): discs, DS and N64 games are named by their header - the serial and revision, a few KB per file - so a scan takes seconds; they are marked ◇ *identified*. **Verify** on a console page does the full checksum check. `.7z` archives are checked from their own index, without unpacking. PS3 game folders are named by their `PARAM.SFO`, Xbox 360 images by their `default.xex`. Sort inbox names big disc images (over 1 GB) by their header first, so it doesn't read them whole.
-- Sort inbox puts games where yours are: in A-Z letter folders when the console has them, in a folder of their own when your discs each have one (Wii `L<game><game>.wbfs`). It moves a disc of several files (`.cue` / `.gdi` + tracks) as one into `<console>\<Redump name>\`.
+- Sort inbox puts games where yours are: in A-Z letter folders when the console has them, in a folder of their own when your discs each have one (Wii `L\<game>\<game>.wbfs`). It moves a disc of several files (`.cue` / `.gdi` + tracks) as one into `<console>\<Redump name>\`.
 
 ## Download
 Grab the latest [release](https://github.com/Farathim89/rom-collection-checker/releases):
