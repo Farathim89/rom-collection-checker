@@ -290,7 +290,13 @@ def undo(log: Path) -> tuple[int, list[str]]:
                 Path(s["from"]).parent.mkdir(parents=True, exist_ok=True)
                 shutil.move(s["to"], s["from"])
             elif s["op"] == "created":
-                recycle(Path(s["path"]))
+                p = Path(s["path"])
+                if p.exists() and recycle_bin_off(p):     # never deleted for good: parked next to the logs
+                    park = log.parent / "removed copies" / p.name
+                    park.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(p), str(park))
+                else:
+                    recycle(p)
             n += 1
         except OSError as e:
             problems.append(str(e))
@@ -298,10 +304,37 @@ def undo(log: Path) -> tuple[int, list[str]]:
     return n, problems
 
 
+def recycle_bin_off(p: Path) -> bool:
+    """True when Windows deletes files on this drive at once instead of keeping them in the Recycle Bin
+    (also when the drive's Recycle Bin is too small for the file)."""
+    try:
+        import ctypes  # noqa: PLC0415
+        import winreg  # noqa: PLC0415
+        buf = ctypes.create_unicode_buffer(64)
+        root = str(Path(p).resolve().anchor)
+        if not ctypes.windll.kernel32.GetVolumeNameForVolumeMountPointW(root, buf, 64):
+            return False
+        guid = buf.value[buf.value.index("{"):buf.value.index("}") + 1]
+        key = rf"Software\Microsoft\Windows\CurrentVersion\Explorer\BitBucket\Volume\{guid}"
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key) as k:
+            nuke = winreg.QueryValueEx(k, "NukeOnDelete")[0]
+            try:
+                cap_mb = winreg.QueryValueEx(k, "MaxCapacity")[0]
+            except OSError:
+                cap_mb = 0
+        size = sum(f.stat().st_size for f in Path(p).rglob("*") if f.is_file()) if Path(p).is_dir() else Path(p).stat().st_size
+        return bool(nuke) or (cap_mb and size > cap_mb * 1024 * 1024)
+    except (OSError, ValueError, AttributeError, ImportError):
+        return False
+
+
 def recycle(p: Path) -> None:
-    """To the Recycle Bin (Windows), never a hard delete."""
+    """To the Recycle Bin (Windows), never a hard delete. A drive whose Recycle Bin is off ("remove files
+    immediately") would delete for good, so there it refuses."""
     if not p.exists():
         return
+    if recycle_bin_off(p):
+        raise OSError(f"the Recycle Bin is off on {p.drive} (files would be deleted for good) - left: {p}")
     try:
         import ctypes  # noqa: PLC0415
         from ctypes import wintypes  # noqa: PLC0415
