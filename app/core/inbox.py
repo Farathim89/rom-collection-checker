@@ -102,21 +102,10 @@ def make_console_folders(inbox: str, folders: dict[str, list[str]], games_root: 
     return made
 
 
-def letter_folder(dest: Path, name: str) -> Path:
-    """A console folder laid out in A-Z letter folders (and 0 for digits / signs): the game's letter folder."""
-    letters = [d.name for d in dest.iterdir() if d.is_dir() and len(d.name) == 1] if dest.is_dir() else []
-    if sum(1 for n in letters if n.isalpha()) < 3:
-        return dest
-    first = name[:1].upper()
-    if first.isascii() and first.isalpha():
-        return dest / first
-    return dest / next((n for n in letters if not n.isalpha()), "0")
-
-
 def place(dest: Path, filename: str, folder: bool = False) -> str:
-    """Where a game goes: its letter folder, and its own folder too when the games there each have one
-    (Wii / GameCube: L/Game/Game.wbfs). folder: the target is a folder already (a disc of several files)."""
-    d = letter_folder(dest, filename)
+    """Where a game goes: the console folder, in a folder of its own when the games there each have one
+    (Wii / GameCube: Game/Game.wbfs). folder: the target is a folder already (a disc of several files)."""
+    d = dest
     if not folder and d.is_dir():
         ext = Path(filename).suffix.lower()
         subs = [q for q in d.iterdir() if q.is_dir() and not q.name.startswith(("0 - ", "_"))]

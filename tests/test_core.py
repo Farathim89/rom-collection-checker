@@ -437,25 +437,16 @@ def test_xbox360_title_id_from_default_xex(tmp_path):
     assert probe(p, "x360") is None
 
 
-def test_new_games_go_into_letter_folders(tmp_path):
+def test_games_go_into_the_console_folder(tmp_path):
     from app.core.inbox import place
-    flat = tmp_path / "flat"
-    flat.mkdir()
-    assert place(flat, "Lufia (Europe).sfc") == str(flat / "Lufia (Europe).sfc")
-    az = tmp_path / "az"
-    for n in "0ABL":
-        (az / n).mkdir(parents=True)
-    assert place(az, "Lufia (Europe).sfc") == str(az / "L" / "Lufia (Europe).sfc")
-    assert place(az, "Zool (Europe).sfc") == str(az / "Z" / "Zool (Europe).sfc")      # made when it moves
-    assert place(az, "3 Ninjas Kick Back (USA).sfc") == str(az / "0" / "3 Ninjas Kick Back (USA).sfc")
-
-
-def test_disc_games_keep_their_own_folders(tmp_path):
-    from app.core.inbox import place
-    wii = tmp_path / "wii"
-    for n in "ABL":
-        (wii / n / f"{n} Game").mkdir(parents=True)
-        (wii / n / f"{n} Game" / f"{n} Game.wbfs").write_bytes(b"")
+    snes = tmp_path / "snes"
+    snes.mkdir()
+    (snes / "Lufia (Europe).sfc").write_bytes(b"")
+    assert place(snes, "Zool (Europe).sfc") == str(snes / "Zool (Europe).sfc")
+    wii = tmp_path / "wii"                     # each disc in a folder of its own
+    for n in ("A Game", "B Game"):
+        (wii / n).mkdir(parents=True)
+        (wii / n / f"{n}.wbfs").write_bytes(b"")
     name = "Legend of Zelda, The - Skyward Sword (Europe).wbfs"
-    assert place(wii, name) == str(wii / "L" / "Legend of Zelda, The - Skyward Sword (Europe)" / name)
-    assert place(wii, "Disc", folder=True) == str(wii / "D" / "Disc")
+    assert place(wii, name) == str(wii / "Legend of Zelda, The - Skyward Sword (Europe)" / name)
+    assert place(wii, "Disc", folder=True) == str(wii / "Disc")
