@@ -47,7 +47,14 @@ checker refuses, and Undo parks copies in `RomChecker-data\undo\removed copies` 
 Console folders are found by themselves in your games folder (also inside maker folders like `Nintendo\SNES`), or
 chosen per console in Settings. Cartridge consoles: NES, Famicom Disk System, SNES, N64, Game Boy / Color / Advance,
 Nintendo DS, Virtual Boy, Master System, Game Gear, SG-1000, Mega Drive, 32X, PC Engine, Atari 2600 / 5200 / 7800 /
-Lynx, WonderSwan / Color, Neo Geo Pocket / Color, ColecoVision, MSX / MSX2. Disc consoles (Redump) are planned.
+Lynx, WonderSwan / Color, Neo Geo Pocket / Color, ColecoVision, MSX / MSX2.
+
+**Disc consoles** are checked against [Redump](http://redump.org): PlayStation 1 / 2 / 3, PSP, GameCube, Wii, Saturn,
+Mega-CD, Dreamcast, Xbox / 360, CD-i, PC Engine CD, PC-FX and 3DO.
+- `.iso` and `.bin` tracks by checksum; one `.bin` with all tracks merged is checked by its first (data) track.
+- `.rvz` / `.wbfs` / `.gcz` through Dolphin's `DolphinTool.exe` (found by itself, or set in Settings).
+- `.cdi`, `.pbp`, `.cso`, `.chd` and repacked Xbox images can only be matched by name - shown as *by name*.
+- Sort inbox moves a disc of several files (`.cue` / `.gdi` + tracks) as one into `<console>\<Redump name>\`.
 
 ## Download
 Grab the latest [release](https://github.com/Farathim89/rom-collection-checker/releases):
