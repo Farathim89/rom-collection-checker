@@ -55,7 +55,7 @@ def test_parse_kinds_and_scopes():
     assert by["Test Game (USA)"].kind == "game" and by["Test Game (USA)"].scopes == {"USA"}
     assert by["Other Game (Japan) (Proto)"].kind == "prototype"
     assert by["Third (World) (Namcot Collection, Namco Museum Archives Vol 1)"].kind == "rerelease"
-    assert by["Third (World) (Namcot Collection, Namco Museum Archives Vol 1)"].scopes == {"USA", "Europe"}
+    assert by["Third (World) (Namcot Collection, Namco Museum Archives Vol 1)"].scopes == set(dat.REGION_KEYS)
 
 
 def _store(tmp_path):
@@ -373,3 +373,11 @@ def test_switch_files_by_title_id(tmp_path):
     assert r.counts({"game"}, "All") == (1, 1)
     assert [(k, v) for k, v, _t, _l in r.extras["Kart Game (World)"]] == [("update", 1114112)]
     assert not r.unknown                                   # .part02 of a split archive isn't counted
+
+
+def test_regions_countries_and_groups():
+    e = lambda g: dat.parse(f'game (\n\tname "{g}"\n\trom ( name "x" size 1 crc 00000001 )\n)\n')[0]  # noqa: E731
+    assert e("A (Germany)").scopes == {"Germany"}
+    assert e("A (Canada)").scopes == {"USA"} and e("A (Sweden)").scopes == {"Scandinavia"}
+    assert {"Europe", "Germany", "Spain", "UK"} <= e("A (Europe)").scopes and "USA" not in e("A (Europe)").scopes
+    assert e("A (Korea)").scopes == {"Korea"} and e("A (Version 3.5)").scopes == {"Other"}

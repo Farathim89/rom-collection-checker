@@ -18,7 +18,7 @@ from .. import __version__
 from ..config import CACHE, DATS, EXTRA, Settings, load_settings, save_settings
 from ..core.collection import ConsoleResult, ScanCache, find_folders, scan_console, wrong_console
 from ..core.consoles import BY_KEY, CONSOLES
-from ..core.dat import DatStore
+from ..core.dat import EUROPE_KEYS, REGION_GROUPS, REGION_KEYS, DatStore
 from ..core.extra import ExtraStore
 from ..core.hashing import Tools
 from ..portable import ui_settings
@@ -28,7 +28,22 @@ KIND_SETS = {"Official games": {"game"},
              "+ unlicensed": {"game", "unlicensed"},
              "Everything (protos, demos, homebrew …)": {"game", "unlicensed", "prototype", "demo", "homebrew",
                                                         "pirate", "program", "rerelease"}}
-REGIONS = ["USA", "Europe", "Japan", "Other"]   # Other: Korea, Brazil, Asia, China ... (World counts as USA + Europe)
+class StayOpenMenu(QMenu):
+    """A menu that stays open while you tick its items; it closes when you click outside it."""
+
+    def mouseReleaseEvent(self, e) -> None:  # noqa: N802
+        a = self.activeAction()
+        if a is not None and a.isCheckable() and a.isEnabled():
+            a.trigger()
+            return
+        super().mouseReleaseEvent(e)
+
+    def keyPressEvent(self, e) -> None:  # noqa: N802
+        a = self.activeAction()
+        if e.key() in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space) and a is not None and a.isCheckable():
+            a.trigger()
+            return
+        super().keyPressEvent(e)
 GAME_COLS = ["Title", "Regions", "Status", "Versions", "Your file"]
 OVERVIEW_COLS = ["Console", "Have", "Total", "%", "Missing", "Files", "Not in No-Intro", "Duplicates", "List"]
 THUMBS = "https://thumbnails.libretro.com/{}/Named_Boxarts/{}.png"
@@ -249,16 +264,30 @@ class MainWindow(QMainWindow):
         self.region_btn = QToolButton()
         self.region_btn.setObjectName("regionbtn")
         self.region_btn.setPopupMode(QToolButton.InstantPopup)
-        menu = QMenu(self.region_btn)
+        menu = StayOpenMenu(self.region_btn)
         self.region_acts: dict[str, QAction] = {}
-        for r in REGIONS:
-            a = QAction(r, menu, checkable=True)
-            a.setChecked(r in self.s.regions)
-            a.toggled.connect(lambda *_: self._regions_changed())
-            menu.addAction(a)
-            self.region_acts[r] = a
+        self._regions_timer = QTimer(self, singleShot=True, interval=350)   # several ticks in a row: one refill
+        self._regions_timer.timeout.connect(self._regions_changed)
+        for group, keys in REGION_GROUPS:
+            if group:
+                menu.addSection(group)
+            elif self.region_acts:
+                menu.addSeparator()
+            for r in keys:
+                a = QAction(r, menu, checkable=True)
+                a.setChecked(r in self.s.regions)
+                a.toggled.connect(lambda *_: (self.region_btn.setText(self.scope_text(live=True)),
+                                              self._regions_timer.start()))
+                menu.addAction(a)
+                self.region_acts[r] = a
         menu.addSeparator()
-        menu.addAction("All regions", lambda: [a.setChecked(True) for a in self.region_acts.values()])
+        for label, keys in (("All regions", REGION_KEYS), ("Europe and its countries", EUROPE_KEYS)):
+            act = QAction(label, menu)
+            act.triggered.connect(lambda _=False, ks=keys: [self.region_acts[k].setChecked(True) for k in ks])
+            menu.addAction(act)
+        act = QAction("Only USA (World releases always count)", menu)
+        act.triggered.connect(lambda: [a.setChecked(k == "USA") for k, a in self.region_acts.items()])
+        menu.addAction(act)
         self.region_btn.setMenu(menu)
         self.region_btn.setText(self.scope_text())
         self.kind_box = QComboBox()
@@ -384,14 +413,21 @@ class MainWindow(QMainWindow):
     def kinds(self) -> set[str]:
         return KIND_SETS[self.kind_box.currentText()]
 
-    def scope(self):
-        """"All", or the set of regions ticked."""
-        on = {r for r in REGIONS if r in self.s.regions}
-        return "All" if len(on) == len(REGIONS) else on
+    def scope(self, live: bool = False):
+        """"All", or the set of regions ticked (live: as ticked in the open picker right now)."""
+        chosen = [r for r, a in self.region_acts.items() if a.isChecked()] if live else self.s.regions
+        on = {r for r in REGION_KEYS if r in chosen}
+        return "All" if len(on) == len(REGION_KEYS) else on
 
-    def scope_text(self) -> str:
-        sc = self.scope()
-        return "All regions" if sc == "All" else " + ".join(r for r in REGIONS if r in sc)
+    def scope_text(self, live: bool = False) -> str:
+        sc = self.scope(live)
+        if sc == "All":
+            return "All regions"
+        off = [r for r in REGION_KEYS if r not in sc]
+        if len(off) <= 2:
+            return "All but " + ", ".join(off)
+        on = [r for r in REGION_KEYS if r in sc]
+        return " + ".join(on) if len(on) <= 3 else f"{len(on)} regions"
 
     def folders(self) -> dict[str, list[str]]:
         f = find_folders(self.s.games_root, self.s.folders)

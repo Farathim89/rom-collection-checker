@@ -27,6 +27,21 @@ KINDS = (("unlicensed", re.compile(r"^Unl$", re.I)),
          ("rerelease", re.compile(r"^(Virtual Console|Switch Online|Collection of .*|Namco Museum .*|"
                                   r"Capcom .* Collection|Retro-Bit|Limited Run.*|Arcade Archives|Evercade|Namcot Collection|"
                                   r"Namco Museum Archives.*|.* Collection|Virtual Console.*|NP|LodgeNet)$", re.I)))
+# the region picker: (group, keys) - each key a tick of its own
+REGION_GROUPS = (("", ("USA",)),          # a World release counts for every region, so World isn't a tick
+                 ("Europe", ("Europe", "UK", "Germany", "France", "Spain", "Italy", "Netherlands", "Scandinavia",
+                             "Portugal", "Poland", "Russia", "Greece", "Australia")),
+                 ("Asia", ("Japan", "Asia", "Korea", "China", "Taiwan")),
+                 ("", ("Brazil", "Other")))
+REGION_KEYS = tuple(k for _g, ks in REGION_GROUPS for k in ks)
+EUROPE_KEYS = ("Europe", "UK", "Germany", "France", "Spain", "Italy", "Netherlands", "Scandinavia", "Portugal",
+               "Poland", "Russia", "Greece", "Australia")
+REGION_OF = {k: k for k in REGION_KEYS}
+REGION_OF.update({"World": "World", "Canada": "USA", "United Kingdom": "UK", "Belgium": "Netherlands", "Austria": "Germany",
+                  "Switzerland": "Germany", "Sweden": "Scandinavia", "Denmark": "Scandinavia", "Norway": "Scandinavia",
+                  "Finland": "Scandinavia", "New Zealand": "Australia", "Hong Kong": "Asia", "India": "Asia",
+                  "United Arab Emirates": "Asia", "Latin America": "Brazil", "Argentina": "Brazil", "Peru": "Brazil",
+                  "Mexico": "Brazil", "Turkey": "Other"})
 EUROPE = {"Europe", "Germany", "France", "Spain", "Italy", "Netherlands", "Sweden", "Scandinavia", "UK",
           "Australia", "Denmark", "Norway", "Finland", "Portugal", "Greece", "Poland", "Russia"}
 
@@ -44,15 +59,16 @@ class Entry:
 
     @property
     def scopes(self) -> set[str]:
-        """USA / Europe / Japan / Other (World counts for USA and Europe)."""
+        """The region picker's choices this version counts for. A World release counts everywhere, a Europe
+        release for each European country too; Canada counts as USA, Sweden / Denmark … as Scandinavia."""
         out = set()
         for r in self.regions:
-            if r in ("USA", "World", "Canada"):
-                out.add("USA")
-            if r in EUROPE or r == "World":
-                out.add("Europe")
-            if r == "Japan":
-                out.add("Japan")
+            k = REGION_OF.get(r, "Other")
+            out.add(k)
+            if k == "World":
+                out.update(REGION_KEYS)
+            elif k == "Europe":
+                out.update(EUROPE_KEYS)
         return out or {"Other"}
 
 
