@@ -110,6 +110,7 @@ class Step:
     target: str = ""            # where it goes
     unpack: bool = False        # take the ROM out of its archive
     enabled: bool = True
+    done: bool = False          # set by apply_plan when the game is in the collection
 
     @property
     def label(self) -> str:
@@ -258,16 +259,76 @@ def apply_plan(plan: Plan, tools: Tools, undo_dir: Path, progress=lambda t: None
                     continue
                 shutil.copy2(got, t)
                 done.append({"op": "created", "path": str(t)})
+                s.done = True
             else:
                 if not Path(s.source).exists():
                     continue   # an archive with several games already moved by an earlier step
                 shutil.move(s.source, t)
                 done.append({"op": "moved", "from": s.source, "to": str(t)})
+                s.done = True
             targets.add(str(t).lower())
         except OSError as e:
             problems.append(f"{s.label}: {e}")
     work.cleanup()
     return len(done), problems, write_undo(undo_dir, "sort", done)
+
+
+HAD = ("you have it", "same as another file here")
+
+
+def leftovers(plan: Plan, games_root: str) -> list[tuple[Path, Path]]:
+    """After a sort: inbox files whose every game is now in your collection - games you already had, and archives
+    whose games were taken out - with where they go: <games>\\_Duplicates\\<inbox name>\\<same path>."""
+    inbox = Path(plan.inbox)
+    dest = Path(games_root) / "_Duplicates" / inbox.name
+    by: dict[str, list[Step]] = {}
+    for st in plan.steps:
+        by.setdefault(st.source, []).append(st)
+    out = []
+    for src, steps in by.items():
+        if all(st.reason in HAD or st.done for st in steps) and Path(src).is_file():
+            try:
+                out.append((Path(src), dest / Path(src).relative_to(inbox)))
+            except ValueError:
+                continue
+    return out
+
+
+def drop_folder_names() -> set[str]:
+    """The Maker\\Console folders 'Make console folders' makes - they stay when the inbox is tidied."""
+    names = {c.maker.lower() for c in CONSOLES}
+    for c in CONSOLES:
+        names.update(n.lower() for n in names_of(c))
+    return names
+
+
+def tidy_inbox(plan: Plan, games_root: str, undo_dir: Path) -> tuple[int, int, list[str], Path]:
+    """Moves the leftovers to _Duplicates (logged for Undo) and removes the empty folders they leave
+    (not the Maker\\Console drop folders). Returns (files moved, folders removed, problems, undo log)."""
+    done, problems = [], []
+    for src, dst in leftovers(plan, games_root):
+        try:
+            q, k = dst, 2
+            while q.exists():
+                q = dst.with_name(f"{dst.stem} ({k}){dst.suffix}")
+                k += 1
+            q.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(src), str(q))
+            done.append({"op": "moved", "from": str(src), "to": str(q)})
+        except OSError as e:
+            problems.append(f"{src}: {e}")
+    keep = drop_folder_names()
+    removed = 0
+    inbox = Path(plan.inbox)
+    for d in sorted((p for p in inbox.rglob("*") if p.is_dir()), key=lambda p: -len(p.parts)):
+        if d.name.lower() in keep:
+            continue
+        try:
+            d.rmdir()            # only succeeds when the folder is empty - nothing is deleted
+            removed += 1
+        except OSError:
+            pass
+    return len(done), removed, problems, write_undo(undo_dir, "inbox tidy", done)
 
 
 def write_undo(undo_dir: Path, kind: str, done: list[dict]) -> Path:

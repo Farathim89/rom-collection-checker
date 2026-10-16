@@ -10,12 +10,12 @@ from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QDialog, QDialogButtonBo
                                QMessageBox, QPlainTextEdit, QPushButton, QScrollArea, QTabWidget, QTableWidget,
                                QToolButton, QVBoxLayout, QWidget)
 
-from ..config import UNDO, Settings
+from ..config import UNDO, Settings, save_settings
 from ..core.collection import find_folders
 from ..core.consoles import BY_KEY, CONSOLES
 from ..core.dat import DatStore
 from ..core.hashing import Tools
-from ..core.inbox import apply_plan, make_console_folders, make_plan, undo
+from ..core.inbox import HAD, apply_plan, make_console_folders, make_plan, tidy_inbox, undo
 from ..core.rename import apply_renames, make_renames
 from . import theme
 from .main_window import Item, open_folder_of, table
@@ -232,6 +232,12 @@ class SortDialog(QDialog):
         self.t.itemDoubleClicked.connect(lambda it: open_folder_of(self.t.item(it.row(), 1).data(Qt.UserRole)))
         v.addWidget(self.t, 1)
         bottom = QHBoxLayout()
+        self.tidy = QCheckBox("Then tidy the inbox: what's now in your collection goes to _Duplicates, empty folders go")
+        self.tidy.setChecked(main.s.tidy_inbox)
+        self.tidy.setToolTip("Games you already had, files sorted in and archives whose games were taken out move to "
+                             "<games folder>\\_Duplicates\\<inbox name> (Undo puts them back). "
+                             "Your Maker\\Console drop folders stay.")
+        bottom.addWidget(self.tidy)
         bottom.addStretch()
         self.b_apply = QPushButton("Apply")
         self.b_apply.setObjectName("primary")
@@ -282,7 +288,7 @@ class SortDialog(QDialog):
         def done(plan) -> None:
             self.plan = plan
             self.fill()
-            self.b_apply.setEnabled(any(st.action == "move" for st in plan.steps))
+            self.b_apply.setEnabled(any(st.action == "move" for st in plan.steps) or any(st.reason in HAD for st in plan.steps))
         self.b_check.setEnabled(False)
         m.run(job, lambda p: (self.b_check.setEnabled(True), done(p)), "Checking the inbox…")
 
@@ -324,20 +330,37 @@ class SortDialog(QDialog):
             if st.action == "move":
                 st.enabled = chk.checkState() == Qt.Checked
         n = sum(1 for st in self.plan.steps if st.action == "move" and st.enabled)
-        if QMessageBox.question(self, "Sort", f"Move {n} games into your collection? (An undo log is kept.)") \
-                != QMessageBox.Yes:
-            return
         m, s = self.main, self.main.s
+        tidy = self.tidy.isChecked()
+        if s.tidy_inbox != tidy:
+            s.tidy_inbox = tidy
+            save_settings(s)
+        ask = f"Move {n} games into your collection?" + (
+            " Then tidy the inbox (what's in your collection goes to _Duplicates)?" if tidy else "")
+        if QMessageBox.question(self, "Sort", ask + " (An undo log is kept.)") != QMessageBox.Yes:
+            return
         tools = Tools(s.sevenzip, s.winrar_dir)
         plan = self.plan
 
+        def job(w):
+            moved, problems, log = apply_plan(plan, tools, UNDO, w.signals.progress.emit)
+            tidied = (0, 0, [], None)
+            if tidy:
+                w.signals.progress.emit("Tidying the inbox…")
+                tidied = tidy_inbox(plan, s.games_root, UNDO)
+            return moved, problems, log, tidied
+
         def done(res) -> None:
-            moved, problems, log = res
-            QMessageBox.information(self, "Sorted", f"{moved} games moved in.\nUndo log: {log.name}" +
-                                    ("\n\n" + "\n".join(problems[:30]) if problems else ""))
+            moved, problems, log, (out, dirs, tprob, tlog) = res
+            text = f"{moved} games moved in (undo log: {log.name})."
+            if tlog:
+                text += (f"\n{out} files moved from the inbox to _Duplicates, {dirs} empty folders removed "
+                         f"(undo log: {tlog.name}).")
+            problems = problems + tprob
+            QMessageBox.information(self, "Sorted", text + ("\n\n" + "\n".join(problems[:30]) if problems else ""))
             self.b_apply.setEnabled(False)
             m.scan()
-        m.run(lambda w: apply_plan(plan, tools, UNDO, w.signals.progress.emit), done, "Moving…")
+        m.run(job, done, "Moving…")
 
 
 class RenameDialog(QDialog):

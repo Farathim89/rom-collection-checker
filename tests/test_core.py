@@ -214,3 +214,26 @@ def test_every_module_imports():
     import app
     for m in pkgutil.walk_packages(app.__path__, "app."):
         importlib.import_module(m.name)
+
+
+def test_tidy_inbox_moves_what_you_have_and_keeps_the_rest(tmp_path):
+    from app.core.inbox import apply_plan, tidy_inbox
+    root = tmp_path / "games"
+    inbox = root / "_unsorted"
+    (inbox / "Nintendo" / "NES").mkdir(parents=True)              # a drop folder: stays even when empty
+    (inbox / "pack" / "sub").mkdir(parents=True)
+    rom = b"NES\x1a" + b"\0" * 12 + BODY
+    with zipfile.ZipFile(inbox / "pack" / "sub" / "tg.zip", "w") as z:
+        z.writestr("tg.nes", rom)
+    (inbox / "b [b1].nes").write_bytes(b"broken")
+    store = _store(tmp_path)
+    target = root / "Nintendo" / "Nintendo 8-Bit"
+    plan = make_plan(str(inbox), {"nes": [str(target)]}, {"nes": set()}, store, hashing.Tools(), str(root))
+    n, problems, _ = apply_plan(plan, hashing.Tools(), tmp_path / "undo")
+    assert n == 1 and not problems and (target / "Test Game (USA).nes").is_file()
+    moved, dirs, tprob, log = tidy_inbox(plan, str(root), tmp_path / "undo")
+    assert moved == 1 and not tprob
+    assert (root / "_Duplicates" / "_unsorted" / "pack" / "sub" / "tg.zip").is_file()
+    assert not (inbox / "pack").exists()                          # the empty pack folders went
+    assert (inbox / "Nintendo" / "NES").is_dir()                  # the drop folder stayed
+    assert (inbox / "b [b1].nes").is_file()                       # a bad dump stays in the inbox
