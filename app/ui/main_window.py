@@ -18,7 +18,7 @@ from .. import __version__
 from ..config import CACHE, DATS, EXTRA, Settings, load_settings, save_settings
 from ..core.collection import ConsoleResult, ScanCache, find_folders, scan_console, wrong_console
 from ..core.consoles import BY_KEY, CONSOLES
-from ..core.dat import EUROPE_KEYS, REGION_GROUPS, REGION_KEYS, DatStore
+from ..core.dat import REGION_KEYS, DatStore
 from ..core.extra import ExtraStore
 from ..core.hashing import Tools
 from ..portable import ui_settings
@@ -270,11 +270,7 @@ class MainWindow(QMainWindow):
         self.region_acts: dict[str, QAction] = {}
         self._regions_timer = QTimer(self, singleShot=True, interval=350)   # several ticks in a row: one refill
         self._regions_timer.timeout.connect(self._regions_changed)
-        for group, keys in REGION_GROUPS:
-            if group:
-                menu.addSection(group)
-            elif self.region_acts:
-                menu.addSeparator()
+        for keys in (REGION_KEYS,):              # USA / Europe / Asia / Other (World releases always count)
             for r in keys:
                 a = QAction(r, menu, checkable=True)
                 a.setChecked(r in self.s.regions)
@@ -283,7 +279,7 @@ class MainWindow(QMainWindow):
                 menu.addAction(a)
                 self.region_acts[r] = a
         menu.addSeparator()
-        for label, keys in (("All regions", REGION_KEYS), ("Europe and its countries", EUROPE_KEYS)):
+        for label, keys in (("All regions", REGION_KEYS),):
             act = QAction(label, menu)
             act.triggered.connect(lambda _=False, ks=keys: [self.region_acts[k].setChecked(True) for k in ks])
             menu.addAction(act)
@@ -425,11 +421,7 @@ class MainWindow(QMainWindow):
         sc = self.scope(live)
         if sc == "All":
             return "All regions"
-        off = [r for r in REGION_KEYS if r not in sc]
-        if len(off) <= 2:
-            return "All but " + ", ".join(off)
-        on = [r for r in REGION_KEYS if r in sc]
-        return " + ".join(on) if len(on) <= 3 else f"{len(on)} regions"
+        return " + ".join(r for r in REGION_KEYS if r in sc)      # USA / Europe / Asia / Other
 
     def folders(self) -> dict[str, list[str]]:
         f = find_folders(self.s.games_root, self.s.folders)

@@ -27,21 +27,17 @@ KINDS = (("unlicensed", re.compile(r"^Unl$", re.I)),
          ("rerelease", re.compile(r"^(Virtual Console|Switch Online|Collection of .*|Namco Museum .*|"
                                   r"Capcom .* Collection|Retro-Bit|Limited Run.*|Arcade Archives|Evercade|Namcot Collection|"
                                   r"Namco Museum Archives.*|.* Collection|Virtual Console.*|NP|LodgeNet)$", re.I)))
-# the region picker: (group, keys) - each key a tick of its own
-REGION_GROUPS = (("", ("USA",)),          # a World release counts for every region, so World isn't a tick
-                 ("Europe", ("Europe", "UK", "Germany", "France", "Spain", "Italy", "Netherlands", "Scandinavia",
-                             "Portugal", "Poland", "Russia", "Greece", "Australia")),
-                 ("Asia", ("Japan", "Asia", "Korea", "China", "Taiwan")),
-                 ("", ("Brazil", "Other")))
-REGION_KEYS = tuple(k for _g, ks in REGION_GROUPS for k in ks)
-EUROPE_KEYS = ("Europe", "UK", "Germany", "France", "Spain", "Italy", "Netherlands", "Scandinavia", "Portugal",
-               "Poland", "Russia", "Greece", "Australia")
-REGION_OF = {k: k for k in REGION_KEYS}
-REGION_OF.update({"World": "World", "Canada": "USA", "United Kingdom": "UK", "Belgium": "Netherlands", "Austria": "Germany",
-                  "Switzerland": "Germany", "Sweden": "Scandinavia", "Denmark": "Scandinavia", "Norway": "Scandinavia",
-                  "Finland": "Scandinavia", "New Zealand": "Australia", "Hong Kong": "Asia", "India": "Asia",
-                  "United Arab Emirates": "Asia", "Latin America": "Brazil", "Argentina": "Brazil", "Peru": "Brazil",
-                  "Mexico": "Brazil", "Turkey": "Other"})
+# regions: the picker's groups (USA / Europe / Asia / Other; a World release counts for all of them), and the real
+# region names in each - Settings → Regions shows them as a tree, each name its own tick
+REGION_TREE = (("World", ("World",)),
+               ("USA", ("USA", "Canada")),
+               ("Europe", ("Europe", "UK", "United Kingdom", "Germany", "Austria", "Switzerland", "France", "Belgium",
+                           "Netherlands", "Spain", "Portugal", "Italy", "Greece", "Scandinavia", "Sweden", "Denmark",
+                           "Norway", "Finland", "Poland", "Russia", "Australia", "New Zealand")),
+               ("Asia", ("Japan", "Asia", "Korea", "China", "Taiwan", "Hong Kong", "India", "United Arab Emirates")),
+               ("Other", ("Brazil", "Latin America", "Argentina", "Peru", "Mexico", "Turkey", "Other")))
+REGION_KEYS = ("USA", "Europe", "Asia", "Other")      # the picker on the main page
+REGION_OF = {raw: group for group, raws in REGION_TREE for raw in raws}
 HIDDEN_REGIONS: set[str] = set()   # Settings → Regions: real region names you hid ("Other" = all unnamed ones)
 
 
@@ -81,8 +77,7 @@ class Entry:
 
     @property
     def scopes(self) -> set[str]:
-        """The region picker's choices this version counts for. A World release counts everywhere, a Europe
-        release for each European country too; Canada counts as USA, Sweden / Denmark … as Scandinavia."""
+        """The picker groups this version counts for: USA / Europe / Asia / Other (a World release counts for all)."""
         out = set()
         regions = [r for r in self.regions if not region_hidden(r)]
         if not regions:                             # only released in regions you hid (Settings → Regions)
@@ -93,8 +88,6 @@ class Entry:
                 out.update(REGION_KEYS)
                 continue
             out.add(k)
-            if k == "Europe":
-                out.update(EUROPE_KEYS)
         return out or {"Other"}
 
 

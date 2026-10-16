@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 from .core.collection import SKIP_DEFAULT
-from .core.dat import EUROPE_KEYS, REGION_KEYS
+from .core.dat import REGION_KEYS, REGION_OF
 from .portable import PORTABLE
 
 STATE: Path = PORTABLE if PORTABLE is not None else \
@@ -30,7 +30,7 @@ class Settings:
     consoles: list[str] = field(default_factory=list)              # consoles to check ([] = every one found)
     count_kinds: list[str] = field(default_factory=lambda: ["game"])  # what counts: game, unlicensed, prototype…
     scope: str = "All"                   # (old setting, read once into regions)
-    regions: list[str] = field(default_factory=lambda: list(REGION_KEYS))  # the ones shown (see dat.REGION_GROUPS)
+    regions: list[str] = field(default_factory=lambda: list(REGION_KEYS))  # the picker: USA / Europe / Asia / Other
     hidden_regions: list[str] = field(default_factory=list)   # Settings → Regions: hidden everywhere
     unpack: bool = True                  # take ROMs out of zips when sorting (not DS: emulators read .7z)
     official_names: bool = True          # sorted games get their No-Intro name
@@ -70,13 +70,9 @@ def load_settings(path: Path = SETTINGS_FILE) -> Settings:
             setattr(s, f.name, data[f.name])
     if "regions" not in data and s.scope in ("USA", "Europe", "Japan", "Other"):
         s.regions = [s.scope]
-    old = {"USA": ["USA"], "Europe": list(EUROPE_KEYS), "Japan": ["Japan"],
-           "Other": ["Asia", "Korea", "China", "Taiwan", "Brazil", "Other"]}
-    s.regions = [r for r in s.regions if r != "World"]
-    if s.regions and set(s.regions) <= set(old) and not set(s.regions) & {"Germany", "Asia"}:
-        s.regions = list(dict.fromkeys(k for r in s.regions for k in old[r]))   # the 4 regions before countries
-        if len(s.regions) >= len(REGION_KEYS) - 1:
-            s.regions = list(REGION_KEYS)
+    # older choices (single countries, or Japan) -> the picker's groups
+    s.regions = list(dict.fromkeys(r if r in REGION_KEYS else REGION_OF.get(r, "Other") for r in s.regions
+                                   if r != "World")) or list(REGION_KEYS)
     return s
 
 

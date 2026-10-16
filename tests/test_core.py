@@ -377,10 +377,11 @@ def test_switch_files_by_title_id(tmp_path):
 
 def test_regions_countries_and_groups():
     e = lambda g: dat.parse(f'game (\n\tname "{g}"\n\trom ( name "x" size 1 crc 00000001 )\n)\n')[0]  # noqa: E731
-    assert e("A (Germany)").scopes == {"Germany"}
-    assert e("A (Canada)").scopes == {"USA"} and e("A (Sweden)").scopes == {"Scandinavia"}
-    assert {"Europe", "Germany", "Spain", "UK"} <= e("A (Europe)").scopes and "USA" not in e("A (Europe)").scopes
-    assert e("A (Korea)").scopes == {"Korea"} and e("A (Version 3.5)").scopes == {"Other"}
+    assert e("A (Germany)").scopes == {"Europe"} and e("A (Europe)").scopes == {"Europe"}
+    assert e("A (Canada)").scopes == {"USA"} and e("A (Sweden)").scopes == {"Europe"}
+    assert e("A (Japan)").scopes == {"Asia"} and e("A (Korea)").scopes == {"Asia"}
+    assert e("A (Brazil)").scopes == {"Other"} and e("A (Version 3.5)").scopes == {"Other"}
+    assert e("A (World)").scopes == {"USA", "Europe", "Asia", "Other"}
 
 
 def test_hidden_regions():
@@ -388,7 +389,7 @@ def test_hidden_regions():
     try:
         dat.HIDDEN_REGIONS = {"Germany", "Other"}
         assert e("A (Germany)").scopes == set()                       # only released where you don't look
-        assert e("A (Germany, Austria)").scopes == {"Germany"}         # Austria (with Germany in the picker) stays
+        assert e("A (Germany, Austria)").scopes == {"Europe"}          # Austria stays
         assert e("A (Europe)").scopes                                   # still there through Europe
         assert e("A (Version 3.5)").scopes == set()                     # "Other" hides what isn't a region
     finally:
