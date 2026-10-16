@@ -7,11 +7,11 @@ the sister of [Book Collection Checker](https://github.com/Farathim89/book-colle
 
 ## What it does
 - **Have / missing per console** - every game file is matched against [No-Intro](https://no-intro.org)'s list of
-  known dumps **by its content** (CRC), so badly named files, copier headers (SNES, PC Engine, Mega Drive …), iNES
+  known dumps **by its content** (CRC), so badly named files, copier headers (SNES, PC Engine, Mega Drive â€¦), iNES
   headers, `.smd` interleave and N64 byte order don't matter. Zip, 7z and rar are read inside.
   - Regions: tick the ones you want (USA, Europe, Japan, Other) - games only released elsewhere are hidden and not
     counted. Any version of a game counts as having it.
-  - Count only official games, or also unlicensed, prototypes, demos, homebrew …
+  - Count only official games, or also unlicensed, prototypes, demos, homebrew â€¦
   - Box art (libretro thumbnails), every No-Intro version of a game with the ones you have ticked.
   - **Copy / save the missing list.**
 - **Sort an inbox folder** (new downloads, packs): each game is recognised by its checksum (else its file type),
@@ -26,13 +26,13 @@ the sister of [Book Collection Checker](https://github.com/Farathim89/book-colle
 - **Downloads** - paste links (http / https) and they download into the inbox, a few at a time, with progress,
   pause / resume / retry; unfinished ones go on after a restart, and a finished file never overwrites one that is
   there. Optionally the inbox is sorted when all are done. It downloads the links you give it - it doesn't search.
-- **Clean names** - known dumps get their official No-Intro name (`smb.nes` → `Super Mario Bros. (World).nes`),
+- **Clean names** - known dumps get their official No-Intro name (`smb.nes` â†’ `Super Mario Bros. (World).nes`),
   with a preview and undo.
 - **Free homebrew** - browse [Homebrew Hub](https://hh.gbdev.io)'s ~1,600 free games, demos and music for Game Boy,
   Game Boy Color, Game Boy Advance and NES (shared by their authors), with screenshots and licenses, and download them
   into `<console folder>\0 - Homebrew`.
 - **A second check** - what No-Intro doesn't list is looked up in TOSEC and libretro's hacks and homebrew lists
-  (Settings → Tools & lists): known translations, hacks and releases aren't problems, Problems shows what each one
+  (Settings â†’ Tools & lists): known translations, hacks and releases aren't problems, Problems shows what each one
   is, and Clean names gives them their TOSEC name.
 - **Problems** - duplicates, files No-Intro doesn't know (bad dumps, hacks, translations), games in the wrong console
   folder, unreadable archives.
@@ -50,7 +50,7 @@ Nintendo DS, Virtual Boy, Master System, Game Gear, SG-1000, Mega Drive, 32X, PC
 Lynx, WonderSwan / Color, Neo Geo Pocket / Color, ColecoVision, MSX / MSX2.
 
 **Disc consoles** are checked against [Redump](http://redump.org): PlayStation 1 / 2 / 3, PSP, GameCube, Wii, Saturn,
-Mega-CD, Dreamcast, Xbox / 360, CD-i, PC Engine CD, PC-FX and 3DO.
+Mega-CD, Dreamcast, Xbox / 360, CD-i, PC Engine CD, PC-FX, 3DO, Amiga CD32 and CDTV.
 - `.iso` and `.bin` tracks by checksum; one `.bin` with all tracks merged is checked by its first (data) track.
 - `.rvz` / `.wbfs` / `.gcz` through Dolphin's `DolphinTool.exe` (found by itself, or set in Settings).
 - `.cdi`, `.pbp`, `.cso`, `.chd` and repacked Xbox images can only be matched by name - shown as *by name*.
@@ -61,7 +61,7 @@ Grab the latest [release](https://github.com/Farathim89/rom-collection-checker/r
 - **ROMCollectionChecker-portable.zip** - unzip anywhere and run `ROMCollectionChecker.exe`; settings, the No-Intro
   lists, the scan cache and the undo logs stay in the `RomChecker-data` folder next to it.
 
-No install, no Python. Windows 10/11. SmartScreen may warn because the exe isn't code-signed: *More info → Run anyway*.
+No install, no Python. Windows 10/11. SmartScreen may warn because the exe isn't code-signed: *More info â†’ Run anyway*.
 
 The No-Intro lists (a few MB of text) come from [libretro-database](https://github.com/libretro/libretro-database);
 the app asks before downloading them. For `.7z` it uses 7-Zip (or WinRAR), for `.rar` WinRAR - found by themselves.
@@ -78,4 +78,4 @@ python -m venv .venv
 `build.cmd` makes the exe (PyInstaller).
 
 ## License
-[MIT](LICENSE) © Farathim
+[MIT](LICENSE) Â© Farathim
