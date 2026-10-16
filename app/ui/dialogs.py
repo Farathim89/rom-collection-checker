@@ -1,13 +1,15 @@
 """Settings, Sort inbox, Clean names and Undo."""
 from __future__ import annotations
 
+import re
+
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor, QIcon
 from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QFrame,
                                QGridLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-                               QMessageBox, QPlainTextEdit, QPushButton, QScrollArea, QTabWidget, QTableWidget,
+                               QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QTabWidget, QTableWidget,
                                QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from ..config import UNDO, Settings, save_settings
@@ -324,6 +326,19 @@ class SortDialog(QDialog):
         self.t = table(PLAN_COLS, {0: 30, 1: 380, 2: 150, 3: 330, 4: 160}, 5)
         self.t.itemDoubleClicked.connect(lambda it: open_folder_of(self.t.item(it.row(), 1).data(Qt.UserRole)))
         v.addWidget(self.t, 1)
+        # what Check / Apply is doing right now (the main window's status bar is behind this window)
+        prow = QHBoxLayout()
+        self.p_text = QLabel("")
+        self.p_text.setObjectName("muted")
+        self.p_bar = QProgressBar()
+        self.p_bar.setMinimumWidth(320)
+        self.p_stop = QPushButton("Stop")
+        self.p_stop.clicked.connect(self.main.stop_job)
+        prow.addWidget(self.p_text, 1)
+        prow.addWidget(self.p_bar)
+        prow.addWidget(self.p_stop)
+        v.addLayout(prow)
+        self._busy(False)
         bottom = QHBoxLayout()
         self.tidy = QCheckBox("Then tidy the inbox: what's now in your collection goes to _Duplicates, empty folders go")
         self.tidy.setChecked(main.s.tidy_inbox)
@@ -341,6 +356,31 @@ class SortDialog(QDialog):
         bottom.addWidget(self.b_apply)
         bottom.addWidget(close)
         v.addLayout(bottom)
+
+    def _busy(self, on: bool, text: str = "") -> None:
+        self.p_bar.setVisible(on)
+        self.p_stop.setVisible(on)
+        if text or not on:
+            self.p_text.setText(text)
+
+    def _watch(self, text: str) -> None:
+        """Shows the running job's progress here: "Checking 12 / 67: …" fills the bar, other steps make it busy."""
+        w = self.main.worker
+        if w is None:
+            return
+        self._busy(True, text)
+        self.p_bar.setRange(0, 0)
+        w.signals.progress.connect(self._progress)
+        w.signals.failed.connect(lambda _e: (self._busy(False), self.b_check.setEnabled(True)))
+
+    def _progress(self, text: str) -> None:
+        self.p_text.setText(text)
+        m = re.search(r"(\d+) / (\d+)", text)
+        if m and "unpacking" not in text:
+            self.p_bar.setRange(0, int(m.group(2)))
+            self.p_bar.setValue(int(m.group(1)))
+        else:
+            self.p_bar.setRange(0, 0)                  # unpacking a big archive: busy
 
     def make_folders(self) -> None:
         inbox = self.inbox.text().strip()
@@ -384,7 +424,8 @@ class SortDialog(QDialog):
             self.fill()
             self.b_apply.setEnabled(any(st.action == "move" for st in plan.steps) or any(st.reason in HAD for st in plan.steps))
         self.b_check.setEnabled(False)
-        m.run(job, lambda p: (self.b_check.setEnabled(True), done(p)), "Checking the inbox…")
+        m.run(job, lambda p: (self.b_check.setEnabled(True), self._busy(False), done(p)), "Checking the inbox…")
+        self._watch("Checking the inbox…")
 
     def fill(self) -> None:
         if not self.plan:
@@ -454,7 +495,8 @@ class SortDialog(QDialog):
             QMessageBox.information(self, "Sorted", text + ("\n\n" + "\n".join(problems[:30]) if problems else ""))
             self.b_apply.setEnabled(False)
             m.scan()
-        m.run(job, done, "Moving…")
+        m.run(job, lambda res: (self._busy(False), done(res)), "Moving…")
+        self._watch("Moving…")
 
 
 class RenameDialog(QDialog):

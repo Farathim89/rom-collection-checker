@@ -15,6 +15,9 @@ from .collection import _TRACK, index, match_by_name, name_index, walk_files
 from .consoles import ARCHIVES, BY_KEY, CONSOLES, Console, consoles_for_ext
 from .dat import DatStore
 from .hashing import Tools, file_items
+from .probe import QUICK_CONSOLES, identify, probe, serial_index
+
+NO_CHECKSUM = {"wbfs", "pbp", "cso", "chd", "cdi", "ciso", "nsp", "nsz", "xci", "xcz"}
 
 BAD = re.compile(r"\[b\d*\]|\(Bad\)|\(Bad Dump\)", re.I)
 HACK = re.compile(r"\[h\w*\]|\(Hack\)", re.I)
@@ -114,6 +117,7 @@ class Step:
     files: list[str] = field(default_factory=list)   # a disc of several files (.cue + tracks): all move into target
     unpack_all: bool = False    # a disc in an archive: everything in it goes into the target folder
     by_name: bool = False       # a disc recognised by its name only
+    by_header: bool = False     # a disc named by its header (serial / game ID), not by a checksum
 
     @property
     def label(self) -> str:
@@ -147,11 +151,17 @@ def make_plan(inbox: str, folders: dict[str, list[str]], have_crcs: dict[str, se
     files = walk_files([inbox], all_exts, [])
     seen: dict[tuple[str, str], str] = {}       # (console, crc) -> first inbox file with it
     disc_names: dict[str, dict[str, str]] = {}   # console -> Redump name index (for discs matched by name)
+    serials: dict[str, dict] = {}                # console -> serial index (for discs named by their header)
+    seen_games: dict[tuple[str, str], str] = {}  # (console, game) -> first inbox file with it
     for n, p in enumerate(files, 1):
         if stop():
             break
-        if n % 20 == 0:
-            progress(f"Checking {n} / {len(files)}: {p.name}")
+        try:
+            mb = p.stat().st_size / 1048576
+        except OSError:
+            mb = 0
+        big = f" ({mb / 1024:.1f} GB - unpacking to read it)" if mb > 512 and p.suffix.lower() in (".7z", ".rar")             else f" ({mb / 1024:.1f} GB)" if mb > 1024 else ""
+        progress(f"Checking {n} / {len(files)}: {p.name}{big}")
         try:
             rel = p.relative_to(inbox).parent.parts
         except ValueError:
@@ -159,7 +169,8 @@ def make_plan(inbox: str, folders: dict[str, list[str]], have_crcs: dict[str, se
         if any(ARCADE.search(part) for part in rel):
             plan.steps.append(Step(str(p), reason="arcade (not checked)"))
             continue
-        items, err = file_items(p, tools, all_exts - set(ARCHIVES))
+        # images that can't match a checksum (trimmed .wbfs, .pbp, .cso …) aren't read whole: their header names them
+        items, err = file_items(p, tools, all_exts - set(ARCHIVES), NO_CHECKSUM)
         if err or not items:
             plan.steps.append(Step(str(p), reason="unreadable" if err else "no game inside"))
             continue
@@ -195,6 +206,13 @@ def make_plan(inbox: str, folders: dict[str, list[str]], have_crcs: dict[str, se
                 continue
             c = BY_KEY[st.console]
             ext = Path(name).suffix.lower().lstrip(".")
+            if not st.game and not it.inner and c.key in QUICK_CONSOLES:
+                if c.key not in serials:
+                    serials[c.key] = serial_index(dats.entries(c.dat))
+                pr = probe(p, c.key, tools.dolphin)
+                g = identify(pr, serials[c.key], p, it.size)[0] if pr else ""
+                if g:
+                    st.game, st.by_header = g, True
             if not st.game and c.source == "redump" and (ext in c.name_only or ext in c.name_fallback or not it.crcs):
                 if c.key not in disc_names:
                     disc_names[c.key] = name_index(dats.entries(c.dat))
@@ -208,11 +226,15 @@ def make_plan(inbox: str, folders: dict[str, list[str]], have_crcs: dict[str, se
                 st.reason = "you have it (by name)"   # the same game is in your folder; only the name says so
                 continue
             first = next((seen[(st.console, x)] for x in it.crcs if (st.console, x) in seen), None)
+            if not first and st.game and (st.by_name or st.by_header):    # a disc named twice (.wbfs and its .7z)
+                first = seen_games.get((st.console, st.game))
             if first:
                 st.reason = "same as another file here"
                 continue
             for x in it.crcs:
                 seen[(st.console, x)] = st.label
+            if st.game:
+                seen_games.setdefault((st.console, st.game), st.label)
             if not st.game:
                 if BAD.search(name):
                     st.reason = "bad dump"
@@ -227,7 +249,8 @@ def make_plan(inbox: str, folders: dict[str, list[str]], have_crcs: dict[str, se
                     st.reason = "not in No-Intro"
                     continue
             not_in = "new (not in Redump)" if c.source == "redump" else "new (not in No-Intro)"
-            st.action, st.reason = "move", ("new (by name)" if st.by_name else "new") if st.game else (
+            st.action, st.reason = "move", ("new (by name)" if st.by_name else "new (identified by header)"
+                                            if st.by_header else "new") if st.game else (
                 "translation" if TRANSLATION.search(name) else not_in)
             dest = Path((folders.get(c.key) or [str(Path(games_root) / c.maker / c.folders[0])])[0])
             if c.keep_archives and it.inner and len(items) == 1:   # one game per archive: it stays packed
@@ -301,8 +324,9 @@ def apply_plan(plan: Plan, tools: Tools, undo_dir: Path, progress=lambda t: None
     targets: set[str] = set()
     unpacked: dict[str, Path | None] = {}       # archive -> its temp folder (each archive is unpacked once)
     work = tempfile.TemporaryDirectory(prefix="romsort-")
-    for n, s in enumerate([s for s in plan.steps if s.enabled and s.action == "move"], 1):
-        progress(f"Moving {n}: {s.label}")
+    todo = [s for s in plan.steps if s.enabled and s.action == "move"]
+    for n, s in enumerate(todo, 1):
+        progress(f"Moving {n} / {len(todo)}: {s.label}")
         t = Path(s.target)
         if t.exists() or str(t).lower() in targets:
             problems.append(f"already there, left in the inbox: {t}")
@@ -320,6 +344,7 @@ def apply_plan(plan: Plan, tools: Tools, undo_dir: Path, progress=lambda t: None
                 continue
             if s.inner and s.unpack_all:     # a disc in an archive: everything in it into its folder
                 t.mkdir(parents=True)
+                progress(f"Moving {n} / {len(todo)}: unpacking {Path(s.source).name}…")
                 if not tools.extract_all(Path(s.source), t):
                     problems.append(f"could not unpack: {s.source}")
                     continue
@@ -332,6 +357,7 @@ def apply_plan(plan: Plan, tools: Tools, undo_dir: Path, progress=lambda t: None
                 if s.source not in unpacked:
                     tmp = Path(work.name) / str(len(unpacked))
                     tmp.mkdir()
+                    progress(f"Moving {n} / {len(todo)}: unpacking {Path(s.source).name}…")
                     unpacked[s.source] = tmp if tools.extract_all(Path(s.source), tmp) else None
                 tmp = unpacked[s.source]
                 if tmp is None:
