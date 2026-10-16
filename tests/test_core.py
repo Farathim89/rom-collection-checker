@@ -191,3 +191,11 @@ def test_collection_folders_are_not_problems(tmp_path):
     (games / "junk.nes").write_bytes(b"not a game")
     r = scan_console(BY_KEY["nes"], [str(games)], _store(tmp_path), hashing.Tools(), ScanCache(tmp_path / "c.json"), [])
     assert [Path(i.path).name for i in r.unknown] == ["junk.nes"]
+
+
+def test_arcade_chip_sets_are_set_aside():
+    from app.core.inbox import is_arcade_set
+    chips = [hashing.Item("x.zip", n, 1, ["0"]) for n in ("030-p1.rom", "030-c1.rom", "030-c2.rom", "030-m1.rom", "030-v1.rom")]
+    assert is_arcade_set(chips)
+    games = [hashing.Item("x.zip", n, 1, ["0"]) for n in ("Game A (USA).sfc", "Game B (USA).sfc", "Game C.sfc")]
+    assert not is_arcade_set(games)

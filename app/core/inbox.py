@@ -57,6 +57,17 @@ def console_from_folders(path: Path, inbox: Path, candidates: list[Console]) -> 
     return None
 
 
+CHIP = re.compile(r"(?:^|[-_.])(?:[a-z]{1,3}\d{1,2}[a-z]?|\d{1,3}[a-z])\.(?:rom|bin)$|\.(?:[pcmsv]\d|u\d{1,3}|ic\d{1,3})$", re.I)
+NOT_GAME = re.compile(r"\.(?:srm|sav|spc|rsp|st\d|\d{3}|state\d*|sv|cht|ips|bps|ups|txt|nfo|exe|me)$", re.I)
+
+
+def is_arcade_set(items) -> bool:
+    """An archive of chip dumps (MAME / Neo Geo MVS: 030-p1.rom, 030-c1.rom ...) is an arcade set, not a game file."""
+    inner = [i.inner for i in items if i.inner]
+    return len(inner) >= 3 and len(inner) == len(items) and \
+        sum(bool(CHIP.search(Path(n).name)) for n in inner) >= 0.6 * len(inner)
+
+
 def names_of(c: Console) -> tuple[str, ...]:
     return (c.name, inbox_name(c), *c.folders)
 
@@ -145,6 +156,12 @@ def make_plan(inbox: str, folders: dict[str, list[str]], have_crcs: dict[str, se
         items, err = file_items(p, tools, all_exts - set(ARCHIVES))
         if err or not items:
             plan.steps.append(Step(str(p), reason="unreadable" if err else "no game inside"))
+            continue
+        if is_arcade_set(items):
+            plan.steps.append(Step(str(p), reason="arcade (not checked)"))
+            continue
+        if all(NOT_GAME.search(it.inner or p.name) for it in items):
+            plan.steps.append(Step(str(p), reason="save / music / patch (not a game)"))
             continue
         for it in items:
             name = it.inner or p.name
