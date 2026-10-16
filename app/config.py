@@ -38,6 +38,8 @@ class Settings:
     download_folder: str = ""            # where downloads go ("" = the inbox)
     download_parallel: int = 3           # downloads at the same time
     sort_after_downloads: bool = False   # open Sort inbox when the queue is done
+    check_updates: bool = True           # look for a new version on GitHub at start (at most once a day)
+    last_update_check: float = 0.0
     theme: str = "Gold (dark)"
 
 

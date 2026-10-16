@@ -167,6 +167,7 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0, self.open_settings)
         else:
             QTimer.singleShot(0, self.scan)
+        QTimer.singleShot(8000, lambda: self.check_updates(manual=False))
 
     def closeEvent(self, e) -> None:  # noqa: N802
         ui_settings().setValue("geometry", self.saveGeometry())
@@ -750,6 +751,64 @@ class MainWindow(QMainWindow):
             return
         from .dialogs import RenameDialog  # noqa: PLC0415
         RenameDialog(self, self.results[key]).exec()
+
+    # -- self-update ----------------------------------------------------------------------------------
+    def check_updates(self, manual: bool = True, ask: bool = True) -> None:
+        """At start (once a day, when switched on) or from Settings: a newer release on GitHub? Asks first
+        (not with ask=False: ROMCollectionChecker.exe --update)."""
+        import time  # noqa: PLC0415
+        from ..core import update  # noqa: PLC0415
+        if not manual and (not self.s.check_updates or not update.can_update()
+                           or time.time() - self.s.last_update_check < 20 * 3600):
+            return
+        if manual and not update.can_update():
+            QMessageBox.information(self, "Updates", "Updates are for the built ROMCollectionChecker.exe - "
+                                    "from source, use git pull.")
+            return
+        w = Worker(lambda _w: update.latest())
+
+        def done(rel) -> None:
+            self.s.last_update_check = time.time()
+            save_settings(self.s)
+            if not rel or not update.newer(rel.version, __version__):
+                if manual:
+                    QMessageBox.information(self, "Updates", f"You have the newest version ({__version__}).")
+                return
+            if not ask:
+                self.install_update(rel)
+                return
+            notes = re.sub(r"🤖.*", "", rel.notes).strip()
+            box = QMessageBox(self)
+            box.setWindowTitle("Update available")
+            box.setTextFormat(Qt.MarkdownText)
+            box.setText(f"**ROM Collection Checker {rel.version}** is out (you have {__version__}).\n\n"
+                        + (notes[:1500] + ("…" if len(notes) > 1500 else "")) +
+                        "\n\nUpdate now? It downloads the new exe, closes the checker, swaps it and starts again. "
+                        "Your settings and lists stay.")
+            box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+            if box.exec() == QMessageBox.Yes:
+                self.install_update(rel)
+
+        w.signals.done.connect(done)
+        w.signals.failed.connect(lambda err: manual and QMessageBox.warning(self, "Updates", f"Couldn't check: {err}"))
+        self._update_worker = w
+        QThreadPool.globalInstance().start(w)
+
+    def install_update(self, rel) -> None:
+        import sys  # noqa: PLC0415
+        from ..core import update  # noqa: PLC0415
+        target = Path(sys.executable).with_name(Path(sys.executable).name + ".new")
+
+        def job(w: Worker):
+            mb = lambda n: f"{n / 1048576:.1f}"  # noqa: E731
+            return update.download(rel, target, lambda d, t: w.signals.progress.emit(
+                f"Downloading {rel.version}: {mb(d)} of {mb(t)} MB"), lambda: w.stop)
+
+        def done(path) -> None:
+            update.install(path)
+            self.status.setText("Updating - the checker starts again in a moment…")
+            QTimer.singleShot(300, self.close)
+        self.run(job, done, f"Downloading version {rel.version}…")
 
     def undo_dialog(self) -> None:
         from .dialogs import UndoDialog  # noqa: PLC0415

@@ -124,6 +124,12 @@ class SettingsDialog(QDialog):
         upd = QPushButton("Update all lists now")
         upd.clicked.connect(self._update_lists)
         form.addRow("", upd)
+        self.auto_update = QCheckBox("Look for a new version of the checker at start (once a day, asks before updating)")
+        self.auto_update.setChecked(s.check_updates)
+        form.addRow("Updates", self.auto_update)
+        chk = QPushButton("Check for updates now")
+        chk.clicked.connect(lambda: parent.check_updates(manual=True) if parent else None)
+        form.addRow("", chk)
 
         look = QScrollArea()
         look.setWidgetResizable(True)
@@ -178,6 +184,7 @@ class SettingsDialog(QDialog):
         s.unpack, s.official_names = self.unpack.isChecked(), self.names.isChecked()
         s.take_hacks, s.take_unknown = self.hacks.isChecked(), self.unknown.isChecked()
         s.sevenzip, s.winrar_dir = self.seven.text().strip(), self.winrar.text().strip()
+        s.check_updates = self.auto_update.isChecked()
         s.theme = self.theme.current
         self.rescan = self.rescan or before != (s.games_root, s.skip_folders, s.consoles, s.folders)
         self.accept()

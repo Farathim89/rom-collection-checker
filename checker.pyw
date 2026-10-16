@@ -19,6 +19,9 @@ def main() -> int:
     theme.apply(load_settings().theme, app)
     w = MainWindow()
     w.show()
+    if "--update" in sys.argv:          # ROMCollectionChecker.exe --update: update to the newest release now
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(1500, lambda: w.check_updates(manual=True, ask=False))
     return app.exec()
 
 

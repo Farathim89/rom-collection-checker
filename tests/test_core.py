@@ -199,3 +199,18 @@ def test_arcade_chip_sets_are_set_aside():
     assert is_arcade_set(chips)
     games = [hashing.Item("x.zip", n, 1, ["0"]) for n in ("Game A (USA).sfc", "Game B (USA).sfc", "Game C.sfc")]
     assert not is_arcade_set(games)
+
+
+def test_update_versions():
+    from app.core import update
+    assert update.newer("0.1.10", "0.1.9") and update.newer("v0.2", "0.1.1") and not update.newer("0.1.1", "0.1.1")
+    assert not update.can_update()      # from source there is no exe to swap
+
+
+def test_every_module_imports():
+    """The window modules too (a syntax error there is otherwise only found by starting the app)."""
+    import importlib
+    import pkgutil
+    import app
+    for m in pkgutil.walk_packages(app.__path__, "app."):
+        importlib.import_module(m.name)
