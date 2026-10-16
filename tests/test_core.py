@@ -413,3 +413,25 @@ def test_switch_outdated_updates(tmp_path):
     extra = {"latest": {"0100152000022000": 1441792, "010020D01AD24000": 655360}, "dates": {"0100152000022000": "2026-09-01"}}
     assert [(g, m, n) for g, m, n, _d, _l in switch.outdated(r, extra)] == [("Kart (World)", 1114112, 1441792)]
     assert switch.version_text(1114112) == "v17 (1114112)" and switch.version_text(0) == "none"
+
+
+def test_xbox360_title_id_from_default_xex(tmp_path):
+    from app.core.probe import probe
+    img = bytearray(48 * 2048)
+    vd = 0x10000
+    img[vd:vd + 20] = b"MICROSOFT*XBOX*MEDIA"
+    struct.pack_into("<II", img, vd + 0x14, 33, 2048)             # root directory: sector 33, one sector
+    entry = struct.pack("<HHIIBB", 0, 0, 40, 0x3000, 0, 11) + b"default.xex"
+    img[33 * 2048:33 * 2048 + len(entry)] = entry
+    x = 40 * 2048                                                  # default.xex at sector 40
+    img[x:x + 4] = b"XEX2"
+    struct.pack_into(">I", img, x + 0x14, 1)
+    struct.pack_into(">II", img, x + 0x18, 0x00040006, 0x100)     # execution info at 0x100
+    struct.pack_into(">IIII", img, x + 0x100, 0, 7, 0, 0x4D5309C9)
+    img[x + 0x100 + 18] = 2                                        # disc 2
+    p = tmp_path / "forza.iso"
+    p.write_bytes(bytes(img))
+    pr = probe(p, "x360")
+    assert (pr.serial, pr.version, pr.disc) == ("MS2505", 7, 1)
+    p.write_bytes(bytes(48 * 2048))                                # not an Xbox disc
+    assert probe(p, "x360") is None
