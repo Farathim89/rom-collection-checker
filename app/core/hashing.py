@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
 import zipfile
 import zlib
 from dataclasses import dataclass
@@ -95,14 +96,21 @@ class Tools:
                r"C:\Program Files\Dolphin-x64\DolphinTool.exe",
                str(Path(os.environ.get("LOCALAPPDATA", "")) / "Dolphin" / "DolphinTool.exe")]
         self.dolphin = next((c for c in dol if c and Path(c).is_file()), "")
+        self.cancel = threading.Event()   # Stop / closing the app: a running check ends at once
 
     def disc_crc(self, path: Path) -> str:
         """The CRC32 of the disc inside a Dolphin image (.rvz / .wbfs / .gcz), as Redump lists it."""
         if not self.dolphin:
             raise ValueError("needs DolphinTool (Settings → Tools & lists) to check .rvz / .wbfs / .gcz")
         with tempfile.TemporaryDirectory(prefix="romcheck-dolphin-") as user:
-            out = subprocess.run([self.dolphin, "verify", "-u", user, "-a", "crc32", "-i", str(path)],
-                                 capture_output=True, timeout=3600, creationflags=NO_WINDOW)
+            proc = subprocess.Popen([self.dolphin, "verify", "-u", user, "-a", "crc32", "-i", str(path)],
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=NO_WINDOW)
+            while proc.poll() is None:        # a .wbfs is read whole: minutes - Stop must not wait for it
+                if self.cancel.wait(0.3):
+                    proc.kill()
+                    proc.wait()
+                    raise InterruptedError("stopped")
+            out = subprocess.CompletedProcess(proc.args, proc.returncode, *proc.communicate())
         m = re.search(rb"(?<![0-9a-fA-F])([0-9a-fA-F]{8})(?![0-9a-fA-F])", out.stdout + b"\n" + out.stderr)
         if not m:
             raise ValueError("DolphinTool could not read it")
@@ -136,10 +144,12 @@ class Tools:
         return any(to.iterdir())
 
 
-def _stream_crc(path: Path) -> str:
+def _stream_crc(path: Path, cancel: threading.Event | None = None) -> str:
     c = 0
     with open(path, "rb") as f:
         while chunk := f.read(1 << 20):
+            if cancel is not None and cancel.is_set():
+                raise InterruptedError("stopped")
             c = zlib.crc32(chunk, c)
     return f"{c & 0xFFFFFFFF:08x}"
 
@@ -163,7 +173,7 @@ def file_items(path: Path, tools: Tools, rom_exts: set[str], name_only: set[str]
         size = path.stat().st_size
         if size <= VARIANT_LIMIT:   # read whole (header checks); bigger ones (DS, discs) are read in chunks
             return [Item(str(path), "", size, variants(path.read_bytes(), path.name))], ""
-        return [Item(str(path), "", size, [_stream_crc(path)])], ""
+        return [Item(str(path), "", size, [_stream_crc(path, tools.cancel)])], ""
     except (OSError, zipfile.BadZipFile, ValueError, NotImplementedError) as e:
         return [], f"{type(e).__name__}: {e}"
 

@@ -174,7 +174,11 @@ def scan_console(c: Console, folders: list[str], dats: DatStore, tools: Tools, c
             continue
         got = cache.get(p, st)
         if got is None:
+            if stop() or tools.cancel.is_set():
+                break
             got = file_items(p, tools, set(c.exts), set(c.name_only))
+            if tools.cancel.is_set():
+                break                         # stopped halfway through this file: not cached
             cache.put(p, st, *got)
         items, err = got
         if err:

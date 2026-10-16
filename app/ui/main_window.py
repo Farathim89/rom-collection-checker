@@ -157,7 +157,7 @@ class MainWindow(QMainWindow):
         self.bar.setVisible(False)
         self.b_stop = QPushButton("Stop")
         self.b_stop.setVisible(False)
-        self.b_stop.clicked.connect(lambda: self.worker and setattr(self.worker, "stop", True))
+        self.b_stop.clicked.connect(self.stop_job)
         self.statusBar().addWidget(self.status, 1)
         self.statusBar().addPermanentWidget(self.bar)
         self.statusBar().addPermanentWidget(self.b_stop)
@@ -171,10 +171,16 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0, self.scan)
         QTimer.singleShot(8000, lambda: self.check_updates(manual=False))
 
+    def stop_job(self) -> None:
+        if self.worker is not None:
+            self.worker.stop = True
+        tools = getattr(self, "_job_tools", None)
+        if tools is not None:
+            tools.cancel.set()
+
     def closeEvent(self, e) -> None:  # noqa: N802
         ui_settings().setValue("geometry", self.saveGeometry())
-        if self.worker is not None:      # a running scan stops at its next file, so the app can close
-            self.worker.stop = True
+        self.stop_job()                  # a running scan (and its DolphinTool check) stops now, so the app can close
         self.downloads.shutdown()
         self.cache.save()
         super().closeEvent(e)
@@ -670,7 +676,7 @@ class MainWindow(QMainWindow):
             return
         if not self.ensure_lists(list(found)):
             return
-        tools = Tools(self.s.sevenzip, self.s.winrar_dir, self.s.dolphin_tool)
+        tools = self._job_tools = Tools(self.s.sevenzip, self.s.winrar_dir, self.s.dolphin_tool)
 
         def job(w: Worker):
             for k in found:
