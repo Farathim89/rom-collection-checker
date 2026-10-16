@@ -450,3 +450,13 @@ def test_games_go_into_the_console_folder(tmp_path):
     name = "Legend of Zelda, The - Skyward Sword (Europe).wbfs"
     assert place(wii, name) == str(wii / "Legend of Zelda, The - Skyward Sword (Europe)" / name)
     assert place(wii, "Disc", folder=True) == str(wii / "Disc")
+
+
+def test_identical_files_no_intro_does_not_list_are_duplicates(tmp_path):
+    games = tmp_path / "NES"
+    games.mkdir()
+    (games / "Homebrew.nes").write_bytes(b"NES\x1a" + b"\1" * 64)
+    (games / "Homebrew (2).nes").write_bytes(b"NES\x1a" + b"\1" * 64)
+    (games / "Other.nes").write_bytes(b"NES\x1a" + b"\2" * 64)
+    r = scan_console(BY_KEY["nes"], [str(games)], _store(tmp_path), hashing.Tools(), ScanCache(tmp_path / "c.json"), [])
+    assert [sorted(fs) for fs in r.duplicates.values()] == [sorted([str(games / "Homebrew.nes"), str(games / "Homebrew (2).nes")])]

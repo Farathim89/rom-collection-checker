@@ -184,6 +184,7 @@ def scan_console(c: Console, folders: list[str], dats: DatStore, tools: Tools, c
     files = walk_files(folders, exts, skip)
     res.files = len(files)
     by_game: dict[str, list[str]] = {}
+    same: dict[tuple[str, int], list] = {}       # (crc, size) of files No-Intro does not list -> [name, files]
     for n, p in enumerate(files, 1):
         if stop():
             break
@@ -251,6 +252,8 @@ def scan_console(c: Console, folders: list[str], dats: DatStore, tools: Tools, c
                 k = next((known_ix[x] for x in it.crcs if x in known_ix), None)
                 if k:
                     res.known[it.label] = k
+                if c.source == "no-intro" and it.crcs:     # the same dump twice, also when No-Intro doesn't list it
+                    same.setdefault((it.crcs[0], it.size), [k.name if k else Path(it.inner or p.name).stem, []])[1].append(it.label)
                 # a problem: not in a "0 - Homebrew" ... folder (those are on purpose), and not a known good dump
                 if not COLLECTION.search(str(p)) and (k is None or k.kind == "bad"):
                     res.unknown.append(it)
@@ -279,6 +282,10 @@ def scan_console(c: Console, folders: list[str], dats: DatStore, tools: Tools, c
         if len(set(fs)) > 1:
             dup.setdefault(g, [])
             dup[g] += [f for f in dict.fromkeys(fs) if f not in dup[g]]
+    for name, fs in same.values():
+        if len(set(fs)) > 1:
+            dup.setdefault(name, [])
+            dup[name] += [f for f in dict.fromkeys(fs) if f not in dup[name]]
     res.duplicates = dup
     return res
 
