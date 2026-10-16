@@ -110,13 +110,16 @@ class SettingsDialog(QDialog):
         page = QWidget()
         form = QFormLayout(page)
         tabs.addTab(page, "Tools && lists")
-        t = Tools(s.sevenzip, s.winrar_dir)
+        t = Tools(s.sevenzip, s.winrar_dir, s.dolphin_tool)
         self.seven = QLineEdit(s.sevenzip)
         self.seven.setPlaceholderText(t.seven or "not found - needed for .7z")
         form.addRow("7-Zip (7z.exe / 7za.exe)", self.seven)
         self.winrar = QLineEdit(s.winrar_dir)
         self.winrar.setPlaceholderText(str(Path(t.unrar).parent) if t.unrar else "not found - needed for .rar")
         form.addRow("WinRAR folder", folder_row(self.winrar, self))
+        self.dolphin = QLineEdit(s.dolphin_tool)
+        self.dolphin.setPlaceholderText(t.dolphin or "not found - needed to check .rvz / .wbfs / .gcz discs")
+        form.addRow("DolphinTool.exe", self.dolphin)
         have = [c for c in CONSOLES if dats.have(c.dat)]
         info = QLabel(f"{len(have)} No-Intro lists downloaded" + (
             "; oldest " + f"{max(dats.age_days(c.dat) for c in have):.0f} days" if have else ""))
@@ -209,6 +212,7 @@ class SettingsDialog(QDialog):
         s.unpack, s.official_names = self.unpack.isChecked(), self.names.isChecked()
         s.take_hacks, s.take_unknown = self.hacks.isChecked(), self.unknown.isChecked()
         s.sevenzip, s.winrar_dir = self.seven.text().strip(), self.winrar.text().strip()
+        s.dolphin_tool = self.dolphin.text().strip()
         s.check_updates = self.auto_update.isChecked()
         s.theme = self.theme.current
         self.rescan = self.rescan or before != (s.games_root, s.skip_folders, s.consoles, s.folders)
@@ -297,7 +301,7 @@ class SortDialog(QDialog):
             dl = []
         have = {k: r.crcs for k, r in m.results.items()}
         folders = m.folders()
-        tools = Tools(s.sevenzip, s.winrar_dir)
+        tools = Tools(s.sevenzip, s.winrar_dir, s.dolphin_tool)
 
         def job(w):
             for k in dl:
@@ -364,7 +368,7 @@ class SortDialog(QDialog):
             " Then tidy the inbox (what's in your collection goes to _Duplicates)?" if tidy else "")
         if QMessageBox.question(self, "Sort", ask + " (An undo log is kept.)") != QMessageBox.Yes:
             return
-        tools = Tools(s.sevenzip, s.winrar_dir)
+        tools = Tools(s.sevenzip, s.winrar_dir, s.dolphin_tool)
         plan = self.plan
 
         def job(w):

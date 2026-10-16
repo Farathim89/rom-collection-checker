@@ -258,3 +258,47 @@ def test_extra_lists_name_what_no_intro_does_not(tmp_path):
     assert [Path(x.new).name for x in make_renames(r)] == ["Cool Demo (1999)(Someone)[tr en Group].nes"]
     assert kind_of("tosec", "X (USA)[h title]") == "hack" and kind_of("tosec", "X [o]") == "bad"
     assert kind_of("tosec", "X (1990)[mapper 4]") == "release"
+
+
+def test_discs_tracks_and_names(tmp_path):
+    t1, t2 = b"DATA TRACK" * 100, b"AUDIO" * 300
+    crc = lambda b: f"{zlib.crc32(b) & 0xFFFFFFFF:08X}"  # noqa: E731
+    d = tmp_path / "dats"
+    d.mkdir()
+    (d / "Sega - Dreamcast.dat").write_text(
+        'game (\n\tname "Disc Game (USA)"\n'
+        f'\trom ( name "Disc Game (USA) (Track 1).bin" size {len(t1)} crc {crc(t1)} )\n'
+        f'\trom ( name "Disc Game (USA) (Track 2).bin" size {len(t2)} crc {crc(t2)} )\n)\n'
+        'game (\n\tname "Other Game (Europe) (En,Fr)"\n\trom ( name "Other Game (Europe) (En,Fr).bin" size 3 crc 00000009 )\n)\n',
+        encoding="utf-8")
+    games = tmp_path / "Dreamcast"
+    (games / "Disc Game").mkdir(parents=True)
+    (games / "Disc Game" / "Disc Game (USA) (Track 1).bin").write_bytes(t1)
+    (games / "Disc Game" / "Disc Game (USA) (Track 2).bin").write_bytes(t2)
+    (games / "Other Game (Europe) (En,Fr).cdi").write_bytes(b"not the original layout")
+    r = scan_console(BY_KEY["dc"], [str(games)], dat.DatStore(d), hashing.Tools(), ScanCache(tmp_path / "c.json"), [])
+    assert r.counts({"game"}, "All") == (2, 2)
+    assert not r.duplicates                                          # two tracks of one disc aren't duplicates
+    assert list(r.by_name.values()) == ["Other Game (Europe) (En,Fr)"]
+    assert not r.unknown
+
+
+def test_merged_disc_image_and_sibling_tracks(tmp_path):
+    t1, t2 = b"PSX DATA" * 500, b"MUSIC" * 400
+    crc = lambda b: f"{zlib.crc32(b) & 0xFFFFFFFF:08X}"  # noqa: E731
+    d = tmp_path / "dats"
+    d.mkdir()
+    (d / "Sony - PlayStation.dat").write_text(
+        'game (\n\tname "Merged Game (USA)"\n'
+        f'\trom ( name "Merged Game (USA) (Track 1).bin" size {len(t1)} crc {crc(t1)} )\n'
+        f'\trom ( name "Merged Game (USA) (Track 2).bin" size {len(t2)} crc {crc(t2)} )\n)\n'
+        'game (\n\tname "Split Game (Europe)"\n'
+        f'\trom ( name "Split Game (Europe) (Track 1).bin" size {len(t1)} crc {crc(t1[::-1])} )\n)\n', encoding="utf-8")
+    games = tmp_path / "PS1"
+    games.mkdir()
+    (games / "Merged Game (USA).bin").write_bytes(t1 + t2)                    # all tracks in one file
+    (games / "Split Game (Europe) (Track 1).bin").write_bytes(t1[::-1])        # matches
+    (games / "Split Game (Europe) (Track 2).bin").write_bytes(b"audio stored differently")
+    r = scan_console(BY_KEY["ps1"], [str(games)], dat.DatStore(d), hashing.Tools(), ScanCache(tmp_path / "c.json"), [])
+    assert r.counts({"game"}, "All") == (2, 2)
+    assert not r.unknown                                  # the other track belongs to its matched disc

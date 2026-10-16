@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -121,6 +122,7 @@ class ConsoleResult:
     crcs: set[str] = field(default_factory=set)                   # every CRC variant of every file you have
     known: dict = field(default_factory=dict)       # item label -> extra.Known (TOSEC / hacks / homebrew)
     others: list[Item] = field(default_factory=list)  # every file No-Intro doesn't list (also in 0 - folders)
+    by_name: dict = field(default_factory=dict)     # item label -> game, for discs that can only be matched by name
 
     def counts(self, kinds: set[str], scope) -> tuple[int, int]:
         """(titles in scope, titles you have - any version of them counts)."""
@@ -150,6 +152,13 @@ def scan_console(c: Console, folders: list[str], dats: DatStore, tools: Tools, c
     for e in entries:
         res.titles.setdefault(e.title, TitleInfo(e.title)).games.setdefault(e.game, []).append(e)
     exts = set(c.exts) | set(ARCHIVES)
+    names, names_entries = ({}, {})
+    by_game_entries: dict[str, list[Entry]] = {}
+    if c.source == "redump":
+        names_entries = {e.game: e for e in entries}
+        names = name_index(entries)
+        for e in entries:
+            by_game_entries.setdefault(e.game, []).append(e)
     files = walk_files(folders, exts, skip)
     res.files = len(files)
     by_game: dict[str, list[str]] = {}
@@ -165,14 +174,29 @@ def scan_console(c: Console, folders: list[str], dats: DatStore, tools: Tools, c
             continue
         got = cache.get(p, st)
         if got is None:
-            got = file_items(p, tools, set(c.exts))
+            got = file_items(p, tools, set(c.exts), set(c.name_only))
             cache.put(p, st, *got)
         items, err = got
         if err:
             res.errors[str(p)] = err
         for it in items:
-            res.crcs.update(it.crcs)
             found = [e for crc in it.crcs for e in ix.get(crc, [])]
+            if not found and c.source == "redump" and it.crcs and not it.inner and names:
+                # one .bin with all tracks merged: its start is Redump's Track 1 (checked once, then cached)
+                e1 = merged_track1(p, it, names, by_game_entries)
+                if e1:
+                    it.crcs.append(e1.crc)
+                    cache.put(p, st, items, err)
+                    found = [e1]
+            res.crcs.update(it.crcs)
+            if not found and names and (not it.crcs or p.suffix.lower().lstrip(".") in c.name_fallback):
+                # a disc format that can't be checked (or a trimmed .wbfs): by its name
+                g = match_by_name(p, names)
+                if g:
+                    res.by_name[it.label] = g
+                    e = names_entries[g]
+                    res.titles[e.title].have.setdefault(g, []).append(it.label)
+                    continue
             if not found:
                 res.others.append(it)
                 k = next((known_ix[x] for x in it.crcs if x in known_ix), None)
@@ -186,9 +210,76 @@ def scan_console(c: Console, folders: list[str], dats: DatStore, tools: Tools, c
             for g in dict.fromkeys(e.game for e in found):
                 e = next(x for x in found if x.game == g)
                 res.titles[e.title].have.setdefault(g, []).append(it.label)
-                by_game.setdefault(g, []).append(it.label)
-    res.duplicates = {g: fs for g, fs in by_game.items() if len(set(fs)) > 1}
+                for x in (y for y in found if y.game == g):   # per track: a disc's tracks aren't duplicates
+                    by_game.setdefault((g, x.rom), []).append(it.label)
+    # the other tracks of a disc whose track matched (Redump keeps some tracks in another form): part of that disc
+    if c.source == "redump" and res.unknown:
+        disc = {}
+        for label, es in res.matched.items():
+            disc[(str(Path(label).parent).lower(), _norm(_TRACK.sub("", Path(label).stem)))] = es[0].game
+        keep = []
+        for it in res.unknown:
+            g = disc.get((str(Path(it.path).parent).lower(), _norm(_TRACK.sub("", Path(it.path).stem))))
+            if g:
+                res.titles[names_entries.get(g, next(e for e in entries if e.game == g)).title].have.setdefault(g, []).append(it.label)
+            else:
+                keep.append(it)
+        res.unknown = keep
+    dup: dict[str, list[str]] = {}
+    for (g, _rom), fs in by_game.items():
+        if len(set(fs)) > 1:
+            dup.setdefault(g, [])
+            dup[g] += [f for f in dict.fromkeys(fs) if f not in dup[g]]
+    res.duplicates = dup
     return res
+
+
+_TRACK = re.compile(r"\s*\(Track \d+\)", re.I)
+
+
+def _norm(s: str) -> str:
+    return re.sub(r"[^a-z0-9()]+", " ", s.lower().replace("&", "and")).strip()
+
+
+def name_index(entries: list[Entry]) -> dict[str, str]:
+    """normalised full name and title -> game (the full name wins: 'metroid prime (europe) (en fr de es it)')."""
+    out: dict[str, str] = {}
+    for e in entries:
+        out.setdefault(_norm(re.sub(r"\s*\(.*$", "", e.game)), e.game)
+    for e in entries:
+        out[_norm(e.game)] = e.game
+    return out
+
+
+def match_by_name(p: Path, names: dict[str, str]) -> str:
+    """A disc file (.cdi, .pbp …) or its game folder named like a Redump game: the full name first, then the title."""
+    for cand in (p.stem, p.parent.name):
+        n = _norm(cand)
+        if n in names:
+            return names[n]
+        t = _norm(re.sub(r"\s*[\(\[].*$", "", cand))
+        if t and t in names:
+            return names[t]
+    return ""
+
+
+def merged_track1(p: Path, it: Item, names: dict[str, str], by_game: dict[str, list[Entry]]) -> Entry | None:
+    """A disc image named like a Redump game but bigger than its Track 1 (the audio tracks merged in): does the
+    start of the file match Track 1?"""
+    g = match_by_name(p, names)
+    for e in by_game.get(g, []):
+        if 0 < e.size < it.size and (_TRACK.search(e.rom) is None or re.search(r"\(Track 0?1\)", e.rom, re.I)):
+            c, left = 0, e.size
+            with open(p, "rb") as f:
+                while left:
+                    b = f.read(min(left, 1 << 22))
+                    if not b:
+                        break
+                    c = zlib.crc32(b, c)
+                    left -= len(b)
+            if not left and f"{c & 0xFFFFFFFF:08x}" == e.crc:
+                return e
+    return None
 
 
 def wrong_console(results: dict[str, ConsoleResult], dats: DatStore) -> list[tuple[str, str, str]]:

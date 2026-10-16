@@ -1,4 +1,4 @@
-"""The consoles the checker knows: their No-Intro list, the file types their games come in, and the folder
+"""The consoles the checker knows: their No-Intro (cartridges) or Redump (discs) list, the file types their games come in, and the folder
 names they are usually kept under (searched for in the games folder, also inside maker folders)."""
 from __future__ import annotations
 
@@ -14,6 +14,9 @@ class Console:
     exts: tuple[str, ...]
     folders: tuple[str, ...] = field(default_factory=tuple)   # usual folder names (first = created when sorting)
     keep_archives: bool = False   # games that stay packed when sorted (big DS cartridges: emulators read .7z)
+    source: str = "no-intro"      # no-intro (cartridges) / redump (discs)
+    name_only: tuple[str, ...] = ()   # file types that aren't the original disc layout: matched by name only
+    name_fallback: tuple[str, ...] = ()   # checked by checksum, but often trimmed (.wbfs): else matched by name
 
 
 CONSOLES: tuple[Console, ...] = (
@@ -56,6 +59,35 @@ CONSOLES: tuple[Console, ...] = (
     Console("coleco", "ColecoVision", "Coleco", "Coleco - ColecoVision", ("col",), ("ColecoVision",)),
     Console("msx", "MSX", "Microsoft", "Microsoft - MSX", ("rom", "mx1"), ("MSX",)),
     Console("msx2", "MSX2", "Microsoft", "Microsoft - MSX2", ("rom", "mx2"), ("MSX2",)),
+    # discs (Redump): data tracks (.bin) and images (.iso) are checked by checksum; .rvz / .wbfs / .gcz through
+    # DolphinTool; .cdi, .pbp, .cso, .chd and repacked Xbox images can only be matched by name
+    Console("ps1", "PlayStation", "Sony", "Sony - PlayStation", ("bin", "img", "iso", "pbp", "chd"),
+            ("Playstation", "PlayStation", "PlayStation 1", "PS1", "PSX"), source="redump", name_only=("pbp", "chd")),
+    Console("ps2", "PlayStation 2", "Sony", "Sony - PlayStation 2", ("iso", "bin", "chd"),
+            ("PlayStation 2", "PS2"), source="redump", name_only=("chd",)),
+    Console("ps3", "PlayStation 3", "Sony", "Sony - PlayStation 3", ("iso",), ("PlayStation 3", "PS3"), source="redump"),
+    Console("psp", "PSP", "Sony", "Sony - PlayStation Portable", ("iso", "cso", "chd"),
+            ("PlayStation Portable", "PSP"), source="redump", name_only=("cso", "chd")),
+    Console("gc", "GameCube", "Nintendo", "Nintendo - GameCube", ("iso", "gcm", "rvz", "gcz", "ciso"),
+            ("Nintendo GameCube", "GameCube", "NGC"), source="redump", name_only=("ciso",)),
+    Console("wii", "Wii", "Nintendo", "Nintendo - Wii", ("iso", "wbfs", "rvz", "gcz"), ("Nintendo WII", "Nintendo Wii", "Wii"),
+            source="redump", name_fallback=("wbfs",)),
+    Console("saturn", "Saturn", "Sega", "Sega - Saturn", ("bin", "iso", "chd"), ("Sega Saturn", "Saturn"),
+            source="redump", name_only=("chd",)),
+    Console("segacd", "Mega-CD / Sega CD", "Sega", "Sega - Mega-CD - Sega CD", ("bin", "iso", "chd"),
+            ("SEGA CD", "Sega CD", "Mega-CD", "Mega CD"), source="redump", name_only=("chd",)),
+    Console("dc", "Dreamcast", "Sega", "Sega - Dreamcast", ("bin", "raw", "cdi", "chd"), ("Sega Dreamcast", "Dreamcast"),
+            source="redump", name_only=("cdi", "chd")),
+    Console("xbox", "Xbox", "Microsoft", "Microsoft - Xbox", ("iso",), ("Xbox",), source="redump", name_only=("iso",)),
+    Console("x360", "Xbox 360", "Microsoft", "Microsoft - Xbox 360", ("iso",), ("Xbox 360",), source="redump"),
+    Console("cdi", "CD-i", "Philips", "Philips - CD-i", ("bin", "iso", "chd"), ("Philips cdi", "Philips CD-i", "CD-i"),
+            source="redump", name_only=("chd",)),
+    Console("pcecd", "PC Engine CD", "NEC", "NEC - PC Engine CD - TurboGrafx-CD", ("bin", "iso", "chd"),
+            ("PC Engine CD", "TurboGrafx-CD", "TurboGrafx CD"), source="redump", name_only=("chd",)),
+    Console("pcfx", "PC-FX", "NEC", "NEC - PC-FX", ("bin", "chd"), ("NEC PC-FX", "PC-FX"), source="redump",
+            name_only=("chd",)),
+    Console("3do", "3DO", "The 3DO Company", "The 3DO Company - 3DO", ("bin", "iso", "chd"), ("3DO",), source="redump",
+            name_only=("chd",)),
 )
 BY_KEY = {c.key: c for c in CONSOLES}
 ARCHIVES = ("zip", "7z", "rar")

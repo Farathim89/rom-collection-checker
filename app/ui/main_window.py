@@ -561,7 +561,9 @@ class MainWindow(QMainWindow):
         for g in sorted(shown, key=lambda g: (g not in ti.have, g)):
             e = ti.games[g][0]
             mine = ti.have.get(g)
-            it = QListWidgetItem(("✓  " if mine else "✗  ") + g + ("" if e.kind == "game" else f"   [{e.kind}]"))
+            by_name = bool(mine) and all(lb in r.by_name for lb in mine)
+            it = QListWidgetItem(("≈  " if by_name else "✓  " if mine else "✗  ") + g
+                                 + ("" if e.kind == "game" else f"   [{e.kind}]") + ("   (by name)" if by_name else ""))
             it.setForeground(QColor(p.ready if mine else p.muted))
             if mine:
                 it.setData(Qt.UserRole, mine[0])
@@ -654,7 +656,7 @@ class MainWindow(QMainWindow):
             return True
         ok = QMessageBox.question(
             self, "Download No-Intro lists?",
-            f"To know which games exist, the checker needs No-Intro's list for {len(need)} console(s):\n\n"
+            f"To know which games exist, the checker needs the No-Intro / Redump list for {len(need)} console(s):\n\n"
             + "\n".join(need) + "\n\nThey are text files (a few MB each) from github.com/libretro/libretro-database, "
             "kept in the checker's data folder. Download them now?")
         if ok != QMessageBox.Yes:
@@ -668,7 +670,7 @@ class MainWindow(QMainWindow):
             return
         if not self.ensure_lists(list(found)):
             return
-        tools = Tools(self.s.sevenzip, self.s.winrar_dir)
+        tools = Tools(self.s.sevenzip, self.s.winrar_dir, self.s.dolphin_tool)
 
         def job(w: Worker):
             for k in found:

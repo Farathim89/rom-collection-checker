@@ -9,7 +9,7 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
-URL = "https://raw.githubusercontent.com/libretro/libretro-database/master/metadat/no-intro/{}.dat"
+URL = "https://raw.githubusercontent.com/libretro/libretro-database/master/metadat/{source}/{name}.dat"
 MAX_AGE = 30 * 86400   # lists are refreshed when a month old (when you ask for an update)
 
 _GAME = re.compile(r'game \(\s*name "((?:[^"\\]|\\.)*)"(.*?)\n\)', re.S)
@@ -105,9 +105,12 @@ class DatStore:
         p = self.path(dat)
         return (time.time() - p.stat().st_mtime) / 86400 if p.is_file() else None
 
-    def download(self, dat: str, timeout: float = 60) -> int:
-        """Fetches one list; returns its size in bytes."""
-        url = URL.format(urllib.parse.quote(dat))
+    def download(self, dat: str, timeout: float = 60, source: str = "") -> int:
+        """Fetches one list (No-Intro, or Redump for discs); returns its size in bytes."""
+        if not source:
+            from .consoles import CONSOLES  # noqa: PLC0415
+            source = next((c.source for c in CONSOLES if c.dat == dat), "no-intro")
+        url = URL.format(source=source, name=urllib.parse.quote(dat))
         req = urllib.request.Request(url, headers={"User-Agent": "ROMCollectionChecker"})
         with urllib.request.urlopen(req, timeout=timeout) as r:   # noqa: S310 - fixed https host
             data = r.read()

@@ -4,6 +4,7 @@ No-Intro's byte order (N64). Archives are read entry by entry: zip natively, 7z 
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -79,9 +80,9 @@ class Item:
 
 
 class Tools:
-    """Where 7-Zip and WinRAR are (settings first, then the usual places)."""
+    """Where 7-Zip, WinRAR and DolphinTool are (settings first, then the usual places)."""
 
-    def __init__(self, sevenzip: str = "", winrar_dir: str = ""):
+    def __init__(self, sevenzip: str = "", winrar_dir: str = "", dolphin_tool: str = ""):
         cands = [sevenzip, r"C:\Program Files\7-Zip\7z.exe", r"C:\Program Files (x86)\7-Zip\7z.exe",
                  shutil.which("7z") or "", shutil.which("7za") or ""]
         self.seven = next((c for c in cands if c and Path(c).is_file()), "")
@@ -89,6 +90,23 @@ class Tools:
         d = next((c for c in rar_dirs if c and (Path(c) / "UnRAR.exe").is_file()), "")
         self.unrar = str(Path(d) / "UnRAR.exe") if d else ""
         self.winrar = str(Path(d) / "WinRAR.exe") if d and (Path(d) / "WinRAR.exe").is_file() else ""
+        # DolphinTool reads .rvz / .wbfs / .gcz and gives the original disc's checksum (Dolphin 5.0-15000 or newer)
+        dol = [dolphin_tool, shutil.which("DolphinTool") or "", r"C:\Program Files\Dolphin\DolphinTool.exe",
+               r"C:\Program Files\Dolphin-x64\DolphinTool.exe",
+               str(Path(os.environ.get("LOCALAPPDATA", "")) / "Dolphin" / "DolphinTool.exe")]
+        self.dolphin = next((c for c in dol if c and Path(c).is_file()), "")
+
+    def disc_crc(self, path: Path) -> str:
+        """The CRC32 of the disc inside a Dolphin image (.rvz / .wbfs / .gcz), as Redump lists it."""
+        if not self.dolphin:
+            raise ValueError("needs DolphinTool (Settings → Tools & lists) to check .rvz / .wbfs / .gcz")
+        with tempfile.TemporaryDirectory(prefix="romcheck-dolphin-") as user:
+            out = subprocess.run([self.dolphin, "verify", "-u", user, "-a", "crc32", "-i", str(path)],
+                                 capture_output=True, timeout=3600, creationflags=NO_WINDOW)
+        m = re.search(rb"(?<![0-9a-fA-F])([0-9a-fA-F]{8})(?![0-9a-fA-F])", out.stdout + b"\n" + out.stderr)
+        if not m:
+            raise ValueError("DolphinTool could not read it")
+        return m.group(1).decode().lower()
 
     def _run(self, args: list[str], timeout: float = 600) -> bytes:
         return subprocess.run(args, capture_output=True, timeout=timeout, creationflags=NO_WINDOW).stdout
@@ -126,16 +144,24 @@ def _stream_crc(path: Path) -> str:
     return f"{c & 0xFFFFFFFF:08x}"
 
 
-def file_items(path: Path, tools: Tools, rom_exts: set[str]) -> tuple[list[Item], str]:
-    """The game files in `path` (itself, or its archive entries). Second value: an error text, or ''."""
+DOLPHIN_EXTS = ("rvz", "wbfs", "gcz")
+
+
+def file_items(path: Path, tools: Tools, rom_exts: set[str], name_only: set[str] = frozenset()) -> tuple[list[Item], str]:
+    """The game files in `path` (itself, or its archive entries). Second value: an error text, or ''.
+    name_only: file types that are not read at all (they can't match a checksum: matched by name later)."""
     ext = path.suffix.lower().lstrip(".")
     try:
+        if ext in name_only:
+            return [Item(str(path), "", path.stat().st_size, [])], ""
+        if ext in DOLPHIN_EXTS:
+            return [Item(str(path), "", path.stat().st_size, [tools.disc_crc(path)])], ""
         if ext == "zip":
             return _zip_items(path, rom_exts), ""
         if ext in ("7z", "rar"):
             return _extracted_items(path, tools, rom_exts)
         size = path.stat().st_size
-        if size <= 1 << 30:   # read whole (fast CRC); variants() itself skips the header checks when big
+        if size <= VARIANT_LIMIT:   # read whole (header checks); bigger ones (DS, discs) are read in chunks
             return [Item(str(path), "", size, variants(path.read_bytes(), path.name))], ""
         return [Item(str(path), "", size, [_stream_crc(path)])], ""
     except (OSError, zipfile.BadZipFile, ValueError, NotImplementedError) as e:

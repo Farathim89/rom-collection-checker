@@ -36,6 +36,7 @@ class Settings:
     take_unknown: bool = True            # dumps No-Intro doesn't list (homebrew, translations, multicarts)
     sevenzip: str = ""                   # 7z.exe / 7za.exe (found by itself when empty)
     winrar_dir: str = ""                 # WinRAR's folder (found by itself when empty)
+    dolphin_tool: str = ""               # DolphinTool.exe, for .rvz / .wbfs / .gcz discs (found by itself when empty)
     download_folder: str = ""            # where downloads go ("" = the inbox)
     download_parallel: int = 3           # downloads at the same time
     sort_after_downloads: bool = False   # open Sort inbox when the queue is done
