@@ -173,6 +173,8 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, e) -> None:  # noqa: N802
         ui_settings().setValue("geometry", self.saveGeometry())
+        if self.worker is not None:      # a running scan stops at its next file, so the app can close
+            self.worker.stop = True
         self.downloads.shutdown()
         self.cache.save()
         super().closeEvent(e)
@@ -808,10 +810,20 @@ class MainWindow(QMainWindow):
                 f"Downloading {rel.version}: {mb(d)} of {mb(t)} MB"), lambda: w.stop)
 
         def done(path) -> None:
+            if self.worker is not None:          # a scan or sort still running: stop it, then close
+                self.worker.stop = True
             update.install(path)
             self.status.setText("Updating - the checker starts again in a moment…")
             QTimer.singleShot(300, self.close)
-        self.run(job, done, f"Downloading version {rel.version}…")
+
+        # its own worker: an update must not wait for (or be refused by) a scan that is running
+        w = Worker(job)
+        w.signals.progress.connect(self.status.setText)
+        w.signals.done.connect(done)
+        w.signals.failed.connect(lambda err: QMessageBox.warning(self, "Update", f"The update failed: {err}"))
+        self._download_worker = w
+        self.status.setText(f"Downloading version {rel.version}…")
+        QThreadPool.globalInstance().start(w)
 
     def undo_dialog(self) -> None:
         from .dialogs import UndoDialog  # noqa: PLC0415
