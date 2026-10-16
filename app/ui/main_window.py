@@ -142,6 +142,9 @@ class MainWindow(QMainWindow):
         from .downloads_page import DownloadsPage  # noqa: PLC0415 - it uses this module's helpers
         self.downloads = DownloadsPage(self)
         self.pages.addWidget(self.downloads)
+        from .homebrew_page import HomebrewPage  # noqa: PLC0415
+        self.homebrew = HomebrewPage(self)
+        self.pages.addWidget(self.homebrew)
         v.addWidget(self.pages, 1)
         h.addWidget(main, 1)
         self.setCentralWidget(root)
@@ -384,7 +387,8 @@ class MainWindow(QMainWindow):
         self.menu.clear()
         running, waiting = self.downloads.counts() if hasattr(self, "downloads") else (0, 0)
         dl = "⬇  Downloads" + (f"   {running} ⬇ · {waiting} ⏳" if running or waiting else "")
-        for label, key in (("📊  Overview", "overview"), ("⚠  Problems", "problems"), (dl, "downloads")):
+        for label, key in (("📊  Overview", "overview"), ("⚠  Problems", "problems"), (dl, "downloads"),
+                           ("🎮  Free homebrew", "homebrew")):
             it = QListWidgetItem(label)
             it.setData(Qt.UserRole, key)
             self.menu.addItem(it)
@@ -442,7 +446,7 @@ class MainWindow(QMainWindow):
         self.show_box.setVisible(key in BY_KEY)
         self.show_label.setVisible(key in BY_KEY)
         for wd in self.filter_widgets:
-            wd.setVisible(key != "downloads")
+            wd.setVisible(key not in ("downloads", "homebrew"))
         if key == "overview":
             self.pages.setCurrentIndex(0)
             self.fill_overview()
@@ -451,6 +455,8 @@ class MainWindow(QMainWindow):
             self.fill_problems()
         elif key == "downloads":
             self.pages.setCurrentIndex(3)
+        elif key == "homebrew":
+            self.pages.setCurrentIndex(4)
         elif key:
             self.pages.setCurrentIndex(1)
             self.fill_games()

@@ -172,3 +172,13 @@ def test_links_keep_their_brackets():
     from app.core.downloads import valid_links
     assert valid_links("(at https://a.b/Game_(USA).zip) or https://a.b/G_(USA).") == [
         "https://a.b/Game_(USA).zip", "https://a.b/G_(USA)"]
+
+
+def test_homebrew_helpers():
+    from app.core import homebrew as hb
+    e = {"slug": "x y", "basepath": "database-gb", "platform": None, "files": [
+        {"filename": "b.gb", "default": False}, {"filename": "files/a.gb", "default": True}],
+        "developer": [{"name": "A", "link": "l"}, "B"], "screenshots": ["cover.png"]}
+    assert hb.console_of(e) == "gb" and hb.console_of({"platform": "GBC"}) == "gbc"
+    assert hb.developers(e) == "A, B" and hb.rom_files(e) == ["files/a.gb", "b.gb"]
+    assert hb.file_url(e, "files/a.gb") == "https://hh3.gbdev.io/static/database-gb/entries/x%20y/files/a.gb"
