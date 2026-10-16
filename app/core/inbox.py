@@ -41,7 +41,7 @@ def console_from_folders(path: Path, inbox: Path, candidates: list[Console]) -> 
     except ValueError:
         return None
     for part in reversed(parts):
-        low = part.lower()
+        low = re.sub(r"[._]+", " ", part.lower())          # "Forza.Horizon.(Xbox.360)" names Xbox 360
         best: dict[str, int] = {}          # console -> length of its longest name in this folder name
         for c in candidates:
             for n in names_of(c):
@@ -203,6 +203,9 @@ def make_plan(inbox: str, folders: dict[str, list[str]], have_crcs: dict[str, se
                     st.game, st.by_name = g, True
             if any(x in have_crcs.get(st.console, set()) for x in it.crcs) or                     (st.game and not st.by_name and st.game in (have_games or {}).get(st.console, ())):
                 st.reason = "you have it"      # by checksum, or the same game named by its header in your folder
+                continue
+            if st.by_name and st.game in (have_games or {}).get(st.console, ()):
+                st.reason = "you have it (by name)"   # the same game is in your folder; only the name says so
                 continue
             first = next((seen[(st.console, x)] for x in it.crcs if (st.console, x) in seen), None)
             if first:
