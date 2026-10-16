@@ -182,3 +182,12 @@ def test_homebrew_helpers():
     assert hb.console_of(e) == "gb" and hb.console_of({"platform": "GBC"}) == "gbc"
     assert hb.developers(e) == "A, B" and hb.rom_files(e) == ["files/a.gb", "b.gb"]
     assert hb.file_url(e, "files/a.gb") == "https://hh3.gbdev.io/static/database-gb/entries/x%20y/files/a.gb"
+
+
+def test_collection_folders_are_not_problems(tmp_path):
+    games = tmp_path / "NES"
+    (games / "0 - Homebrew").mkdir(parents=True)
+    (games / "0 - Homebrew" / "hb.nes").write_bytes(b"homebrew game")
+    (games / "junk.nes").write_bytes(b"not a game")
+    r = scan_console(BY_KEY["nes"], [str(games)], _store(tmp_path), hashing.Tools(), ScanCache(tmp_path / "c.json"), [])
+    assert [Path(i.path).name for i in r.unknown] == ["junk.nes"]

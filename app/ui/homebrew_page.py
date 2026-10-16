@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineE
 
 from ..config import STATE
 from ..core import homebrew as hb
+from ..core.collection import HOMEBREW_FOLDER
 from ..core.consoles import BY_KEY
 from . import theme
 from .main_window import Item, table
@@ -195,7 +196,7 @@ class HomebrewPage(QWidget):
             + f"<br>License: {e.get('license') or 'not given'}<br><br>{desc}<br><br>" + " · ".join(links))
         n = len(sel)
         self.b_get.setText(f"⬇  Download {n} to their console folders" if n > 1 else
-                           f"⬇  Download to {Path(self.target(key)).name if key else 'the inbox'}")
+                           f"⬇  Download to {BY_KEY[key].name} › 0 - Homebrew" if key else "⬇  Download to the inbox")
         self.load_shot(hb.cover_url(e))
 
     def load_shot(self, url: str) -> None:
@@ -223,13 +224,13 @@ class HomebrewPage(QWidget):
 
     # -- download -----------------------------------------------------------------------------------
     def target(self, key: str) -> str:
-        """The console's folder in your collection, else <games folder>\\<maker>\\<console>."""
+        """<console folder>\\0 - Homebrew (MediaDeck shows it as a Homebrew tab). The console folder is the one in
+        your collection, else <games folder>\\<maker>\\<console>."""
         found = self.main.folders().get(key)
-        if found:
-            return found[0]
         c = BY_KEY[key]
         root = self.main.s.games_root or self.main.s.inbox
-        return str(Path(root) / c.maker / c.folders[0]) if root else ""
+        base = found[0] if found else (str(Path(root) / c.maker / c.folders[0]) if root else "")
+        return str(Path(base) / HOMEBREW_FOLDER) if base else ""
 
     def download_selected(self) -> None:
         sel = self.selected()

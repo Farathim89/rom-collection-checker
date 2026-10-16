@@ -4,12 +4,18 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from .consoles import ARCHIVES, CONSOLES, Console
 from .dat import DatStore, Entry
 from .hashing import Item, Tools, file_items
+
+# a "0 - Name" folder in a console folder is a collection of its own (MediaDeck shows it as a sub tab):
+# 0 - Homebrew, 0 - Randomizer, 0 - Hacks ... - games No-Intro doesn't know are expected there
+COLLECTION = re.compile(r"[\\/]0 - [^\\/]+[\\/]")
+HOMEBREW_FOLDER = "0 - Homebrew"
 
 SKIP_DEFAULT = ["_unsorted", "_Duplicates", "_Originals", "_Extras", "_unpacked", "_Lists"]
 
@@ -164,7 +170,8 @@ def scan_console(c: Console, folders: list[str], dats: DatStore, tools: Tools, c
             res.crcs.update(it.crcs)
             found = [e for crc in it.crcs for e in ix.get(crc, [])]
             if not found:
-                res.unknown.append(it)
+                if not COLLECTION.search(str(p)):    # "0 - Homebrew", "0 - Hacks" ...: on purpose, not a problem
+                    res.unknown.append(it)
                 continue
             res.matched[it.label] = found
             for g in dict.fromkeys(e.game for e in found):
