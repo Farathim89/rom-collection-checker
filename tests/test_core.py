@@ -381,3 +381,15 @@ def test_regions_countries_and_groups():
     assert e("A (Canada)").scopes == {"USA"} and e("A (Sweden)").scopes == {"Scandinavia"}
     assert {"Europe", "Germany", "Spain", "UK"} <= e("A (Europe)").scopes and "USA" not in e("A (Europe)").scopes
     assert e("A (Korea)").scopes == {"Korea"} and e("A (Version 3.5)").scopes == {"Other"}
+
+
+def test_hidden_regions():
+    e = lambda g: dat.parse(f'game (\n\tname "{g}"\n\trom ( name "x" size 1 crc 00000001 )\n)\n')[0]  # noqa: E731
+    try:
+        dat.HIDDEN_REGIONS = {"Germany", "Other"}
+        assert e("A (Germany)").scopes == set()                       # only released where you don't look
+        assert e("A (Germany, Austria)").scopes == {"Germany"}         # Austria (with Germany in the picker) stays
+        assert e("A (Europe)").scopes                                   # still there through Europe
+        assert e("A (Version 3.5)").scopes == set()                     # "Other" hides what isn't a region
+    finally:
+        dat.HIDDEN_REGIONS = set()

@@ -42,6 +42,28 @@ REGION_OF.update({"World": "World", "Canada": "USA", "United Kingdom": "UK", "Be
                   "Finland": "Scandinavia", "New Zealand": "Australia", "Hong Kong": "Asia", "India": "Asia",
                   "United Arab Emirates": "Asia", "Latin America": "Brazil", "Argentina": "Brazil", "Peru": "Brazil",
                   "Mexico": "Brazil", "Turkey": "Other"})
+HIDDEN_REGIONS: set[str] = set()   # Settings → Regions: real region names you hid ("Other" = all unnamed ones)
+
+
+def region_hidden(r: str) -> bool:
+    return r in HIDDEN_REGIONS or (r not in REGION_OF and "Other" in HIDDEN_REGIONS)
+
+
+def region_counts(entries_lists) -> dict[str, int]:
+    """Real region name -> games (anything the lists put there that isn't a region counts as Other)."""
+    out: dict[str, int] = {}
+    for entries in entries_lists:
+        seen = set()
+        for e in entries:
+            if e.game in seen:
+                continue
+            seen.add(e.game)
+            for r in e.regions or ("Other",):
+                k = r if r in REGION_OF else "Other"
+                out[k] = out.get(k, 0) + 1
+    return out
+
+
 EUROPE = {"Europe", "Germany", "France", "Spain", "Italy", "Netherlands", "Sweden", "Scandinavia", "UK",
           "Australia", "Denmark", "Norway", "Finland", "Portugal", "Greece", "Poland", "Russia"}
 
@@ -62,7 +84,10 @@ class Entry:
         """The region picker's choices this version counts for. A World release counts everywhere, a Europe
         release for each European country too; Canada counts as USA, Sweden / Denmark … as Scandinavia."""
         out = set()
-        for r in self.regions:
+        regions = [r for r in self.regions if not region_hidden(r)]
+        if not regions:                             # only released in regions you hid (Settings → Regions)
+            return set() if self.regions or region_hidden("Other") else {"Other"}
+        for r in regions:
             k = REGION_OF.get(r, "Other")
             if k == "World":
                 out.update(REGION_KEYS)

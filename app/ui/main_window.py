@@ -134,6 +134,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.s: Settings = load_settings()
         self.dats = DatStore(DATS)
+        from ..core import dat as dat_mod  # noqa: PLC0415
+        dat_mod.HIDDEN_REGIONS = set(self.s.hidden_regions)
         self.extra = ExtraStore(EXTRA)
         self.cache = ScanCache(CACHE)
         self.results: dict[str, ConsoleResult] = {}
@@ -820,6 +822,9 @@ class MainWindow(QMainWindow):
             save_settings(self.s)
             theme.apply(self.s.theme)
             self.fill_menu()
+            if getattr(d, "regions_changed", False):
+                self.fill_overview()
+                self.fill_games()
             if d.rescan:
                 self.scan()
         else:

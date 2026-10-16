@@ -157,6 +157,7 @@ class SettingsDialog(QDialog):
         lv.addStretch()
         look.setWidget(box)
         tabs.addTab(look, "Look")
+        tabs.addTab(self._regions_tab(s, dats), "Regions")
 
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self._save)
@@ -170,6 +171,41 @@ class SettingsDialog(QDialog):
             self.s.folders[key] = [d]
             it.setText(f"{BY_KEY[key].name}   →   {d}")
             it.setCheckState(Qt.Checked)
+
+    def _regions_tab(self, s: Settings, dats: DatStore) -> QWidget:
+        """Every region in your lists, each its own tick: untick one to hide it everywhere."""
+        from ..core.dat import REGION_KEYS, REGION_OF, region_counts  # noqa: PLC0415
+        self.regions_changed = False
+        page = QWidget()
+        v = QVBoxLayout(page)
+        note = QLabel("Untick a region to hide it everywhere: games released only there disappear from the lists, "
+                      "the counts and the missing lists (a game with a version from a region you keep still counts). "
+                      "The Regions picker on the main page works on top of this.")
+        note.setWordWrap(True)
+        note.setObjectName("muted")
+        v.addWidget(note)
+        counts = region_counts(dats.entries(c.dat) for c in CONSOLES if dats.have(c.dat))
+        order = {k: i for i, k in enumerate(("World",) + REGION_KEYS)}
+        self.region_list = QListWidget()
+        for r in sorted(counts, key=lambda r: (order.get(REGION_OF.get(r, "Other"), 99), -counts[r])):
+            group = REGION_OF.get(r, "Other")
+            label = r if group in (r, "World") else f"{r}   (with {group} in the picker)"
+            it = QListWidgetItem(f"{label}   -   {counts[r]:,} games")
+            it.setData(Qt.UserRole, r)
+            it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
+            it.setCheckState(Qt.Unchecked if r in s.hidden_regions else Qt.Checked)
+            self.region_list.addItem(it)
+        v.addWidget(self.region_list, 1)
+        row = QHBoxLayout()
+        for text, fn in (("Select all", lambda st: Qt.Checked), ("Select none", lambda st: Qt.Unchecked),
+                         ("Invert", lambda st: Qt.Unchecked if st == Qt.Checked else Qt.Checked)):
+            b = QPushButton(text)
+            b.clicked.connect(lambda _=False, f=fn: [self.region_list.item(i).setCheckState(
+                f(self.region_list.item(i).checkState())) for i in range(self.region_list.count())])
+            row.addWidget(b)
+        row.addStretch()
+        v.addLayout(row)
+        return page
 
     def _get_extra(self, ex) -> None:
         if ex is None:
@@ -221,6 +257,13 @@ class SettingsDialog(QDialog):
             s.quick_check = self.quick.isChecked()
             self.rescan = True
         s.check_updates = self.auto_update.isChecked()
+        hidden = [self.region_list.item(i).data(Qt.UserRole) for i in range(self.region_list.count())
+                  if self.region_list.item(i).checkState() != Qt.Checked]
+        if sorted(hidden) != sorted(s.hidden_regions):
+            s.hidden_regions = hidden
+            from ..core import dat as dat_mod  # noqa: PLC0415
+            dat_mod.HIDDEN_REGIONS = set(hidden)
+            self.regions_changed = True
         s.theme = self.theme.current
         self.rescan = self.rescan or before != (s.games_root, s.skip_folders, s.consoles, s.folders)
         self.accept()

@@ -31,6 +31,7 @@ class Settings:
     count_kinds: list[str] = field(default_factory=lambda: ["game"])  # what counts: game, unlicensed, prototype…
     scope: str = "All"                   # (old setting, read once into regions)
     regions: list[str] = field(default_factory=lambda: list(REGION_KEYS))  # the ones shown (see dat.REGION_GROUPS)
+    hidden_regions: list[str] = field(default_factory=list)   # Settings → Regions: hidden everywhere
     unpack: bool = True                  # take ROMs out of zips when sorting (not DS: emulators read .7z)
     official_names: bool = True          # sorted games get their No-Intro name
     take_hacks: bool = False             # hacks are sorted in too (translations always are)
