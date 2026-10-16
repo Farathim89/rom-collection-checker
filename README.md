@@ -9,8 +9,8 @@ the sister of [Book Collection Checker](https://github.com/Farathim89/book-colle
 - **Have / missing per console** - every game file is matched against [No-Intro](https://no-intro.org)'s list of
   known dumps **by its content** (CRC), so badly named files, copier headers (SNES, PC Engine, Mega Drive â€¦), iNES
   headers, `.smd` interleave and N64 byte order don't matter. Zip, 7z and rar are read inside.
-  - Regions: tick the ones you want (USA, Europe, Japan, Other) - games only released elsewhere are hidden and not
-    counted. Any version of a game counts as having it.
+  - Regions: the picker has USA / Europe / Asia / Other (World releases always count); Settings → Regions lists every
+    region of your lists (Germany, Canada, Korea …) under its group, each its own tick. Any version counts as having it.
   - Count only official games, or also unlicensed, prototypes, demos, homebrew â€¦
   - Box art (libretro thumbnails), every No-Intro version of a game with the ones you have ticked.
   - **Copy / save the missing list.**
