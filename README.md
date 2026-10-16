@@ -17,7 +17,8 @@ the sister of [Book Collection Checker](https://github.com/Farathim89/book-colle
 - **Sort an inbox folder** (new downloads, packs): each game is recognised by its checksum (else its file type),
   compared with what you have and gets a plan - *move it in*, or leave it (*you have it*, *bad dump*, *hack*,
   *unknown console*). ROMs are taken out of their archives (not Nintendo DS: emulators read `.7z`) and can get their
-  No-Intro name. Nothing moves until you press Apply; every sort can be undone.
+  No-Intro name. Nothing moves until you press Apply; every sort can be undone. Afterwards the inbox is tidied: what's now in
+  your collection goes to `_Duplicates\<inbox name>`, empty folders go.
   - Packs are read by their folder names too (`Atari 2600\roms`, `Sega 32X`), arcade sets (MAME, Neo Geo) are set
     aside, and other dumps of a game you already have stay in the inbox.
   - *Make console folders* adds empty `Maker\Console` folders to the inbox, laid out like your collection: a game you
@@ -30,6 +31,9 @@ the sister of [Book Collection Checker](https://github.com/Farathim89/book-colle
 - **Free homebrew** - browse [Homebrew Hub](https://hh.gbdev.io)'s ~1,600 free games, demos and music for Game Boy,
   Game Boy Color, Game Boy Advance and NES (shared by their authors), with screenshots and licenses, and download them
   into `<console folder>\0 - Homebrew`.
+- **A second check** - what No-Intro doesn't list is looked up in TOSEC and libretro's hacks and homebrew lists
+  (Settings → Tools & lists): known translations, hacks and releases aren't problems, Problems shows what each one
+  is, and Clean names gives them their TOSEC name.
 - **Problems** - duplicates, files No-Intro doesn't know (bad dumps, hacks, translations), games in the wrong console
   folder, unreadable archives.
 
@@ -54,6 +58,9 @@ No install, no Python. Windows 10/11. SmartScreen may warn because the exe isn't
 
 The No-Intro lists (a few MB of text) come from [libretro-database](https://github.com/libretro/libretro-database);
 the app asks before downloading them. For `.7z` it uses 7-Zip (or WinRAR), for `.rar` WinRAR - found by themselves.
+
+The checker updates itself: at start (once a day) it asks GitHub for a newer version and asks before updating;
+`ROMCollectionChecker.exe --update` updates straight away.
 
 ## From source
 ```
