@@ -297,6 +297,9 @@ def make_plan(inbox: str, folders: dict[str, list[str]], have_crcs: dict[str, se
                                             if st.by_header else "new") if st.game else (
                 "translation" if TRANSLATION.search(name) else not_in)
             dest = console_dest(c, folders, games_root)
+            if not st.game:      # a dump the list doesn't know: its own tab, not among the verified games
+                dest = dest / ("0 - Translations" if TRANSLATION.search(name) else
+                               "0 - Hacks" if HACK.search(name) else "0 - Unverified")
             if c.keep_archives and it.inner and len(items) == 1:   # one game per archive: it stays packed
                 st.unpack = False
             if it.inner and not st.unpack:          # the archive itself moves (DS .7z)
