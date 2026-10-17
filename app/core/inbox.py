@@ -115,12 +115,19 @@ def _game_dirs(dest: Path) -> list[Path]:
     return out
 
 
-def place(dest: Path, filename: str, folder: bool = False, region: str = "") -> str:
+DISC_NO = re.compile(r"\s*\(Disc \d+\)", re.I)
+
+
+def place(dest: Path, filename: str, folder: bool = False, region: str = "", own: bool = False) -> str:
     """Where a game goes: the console folder (its region folder in it, when sorting by region), in a folder of its
     own when the games there each have one (Wii / GameCube: Game/Game.wbfs). folder: the target is a folder
     already (a disc of several files)."""
     d = dest / region if region else dest
-    if not folder and dest.is_dir():
+    if folder:                           # a disc of several files: its folder (the discs of a game share it)
+        return str(d / DISC_NO.sub("", filename).strip())
+    if own:                              # disc consoles: every game in a folder of its own, its discs together
+        return str(d / DISC_NO.sub("", Path(filename).stem).strip() / filename)
+    if dest.is_dir():
         ext = Path(filename).suffix.lower()
         subs = _game_dirs(dest)
         tops = [dest] + [q for q in dest.iterdir() if q.is_dir() and q.name in REGION_NAMES]
@@ -333,7 +340,8 @@ def make_plan(inbox: str, folders: dict[str, list[str]], have_crcs: dict[str, se
                 base, ext = Path(name).stem, Path(name).suffix
             if st.game and official_names:
                 base = st.game
-            st.target = place(dest, SAFE.sub("_", base) + ext.lower(), region=region_of_step(st.game))
+            st.target = place(dest, SAFE.sub("_", base) + ext.lower(), region=region_of_step(st.game),
+                              own=c.source == "redump" and not (it.inner and not st.unpack))
     _join_discs(plan, folders, games_root, official_names)
     return plan
 
@@ -381,7 +389,7 @@ def _decide(st: Step, name: str, ext: str, have_games, seen_games, folders, game
     dest = console_dest(c, folders, games_root)
     base = st.game if official_names else Path(name).stem
     st.action, st.reason = "move", "new (identified by header)"
-    st.target = place(dest, SAFE.sub("_", base) + ext, region=region_of_step(st.game))
+    st.target = place(dest, SAFE.sub("_", base) + ext, region=region_of_step(st.game), own=c.source == "redump")
 
 
 DESCRIPTORS = ("cue", "gdi", "m3u", "ccd", "sub", "img", "mds")
@@ -427,7 +435,7 @@ def _join_discs(plan: Plan, folders: dict[str, list[str]], games_root: str, offi
             if len(files) > 1:
                 lead.files, lead.target = files, place(dest, name, folder=True, region=reg)
             else:
-                lead.target = place(dest, name + Path(lead.source).suffix.lower(), region=reg)
+                lead.target = place(dest, name + Path(lead.source).suffix.lower(), region=reg, own=True)
         lead.game = game or lead.game
         for s in steps:
             if s is not lead:
@@ -447,30 +455,39 @@ def apply_plan(plan: Plan, tools: Tools, undo_dir: Path, progress=lambda t: None
     for n, s in enumerate(todo, 1):
         progress(f"Moving {n} / {len(todo)}: {s.label}")
         t = Path(s.target)
-        if t.exists() or str(t).lower() in targets:
+        into_folder = bool(s.files) or (s.inner and s.unpack_all)    # the discs of a game share their folder
+        if not into_folder and (t.exists() or str(t).lower() in targets):
             problems.append(f"already there, left in the inbox: {t}")
             continue
         try:
             t.parent.mkdir(parents=True, exist_ok=True)
             if s.files:                      # a disc of several files: all of them into its folder
-                t.mkdir(parents=True)
+                if any((t / Path(f).name).exists() for f in s.files):
+                    problems.append(f"already there, left in the inbox: {t / Path(s.files[0]).name}")
+                    continue
+                t.mkdir(parents=True, exist_ok=True)
                 for f in s.files:
                     if Path(f).exists():
                         shutil.move(f, t / Path(f).name)
                         done.append({"op": "moved", "from": f, "to": str(t / Path(f).name)})
                 s.done = True
-                targets.add(str(t).lower())
                 continue
             if s.inner and s.unpack_all:     # a disc in an archive: everything in it into its folder
-                t.mkdir(parents=True)
+                tmp = Path(work.name) / f"all{n}"
+                tmp.mkdir()
                 progress(f"Moving {n} / {len(todo)}: unpacking {Path(s.source).name}…")
-                if not tools.extract_all(Path(s.source), t):
+                if not tools.extract_all(Path(s.source), tmp):
                     problems.append(f"could not unpack: {s.source}")
                     continue
-                for q in sorted(t.iterdir()):
-                    done.append({"op": "created", "path": str(q)})
+                got = sorted(q for q in tmp.rglob("*") if q.is_file())
+                if any((t / q.name).exists() for q in got):
+                    problems.append(f"already there, left in the inbox: {s.label}")
+                    continue
+                t.mkdir(parents=True, exist_ok=True)
+                for q in got:                # (never over a file that is there)
+                    shutil.move(str(q), t / q.name)
+                    done.append({"op": "created", "path": str(t / q.name)})
                 s.done = True
-                targets.add(str(t).lower())
                 continue
             if s.inner and s.unpack:
                 if s.source not in unpacked:

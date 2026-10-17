@@ -332,7 +332,7 @@ def test_sort_a_disc_with_its_cue_and_tracks(tmp_path):
     assert not problems
     assert sorted(p.name for p in (saturn / "Disc Game (Europe)").iterdir()) == [
         "Disc Game (Europe) (Track 1).bin", "Disc Game (Europe) (Track 2).bin", "Disc Game (Europe).cue"]
-    assert (dc / "Name Game (USA).cdi").is_file()
+    assert (dc / "Name Game (USA)" / "Name Game (USA).cdi").is_file()      # disc consoles: a folder per game
     tidy_inbox(plan, str(root), tmp_path / "undo")
     assert not (root / "_unsorted" / "pack").exists()
 
@@ -574,3 +574,11 @@ def test_demos_can_stay_in_the_inbox(tmp_path):
                      take_demos=False)
     got = {Path(s.source).name: s.reason for s in plan.steps}
     assert got["Some Game (USA) (Demo).nes"] == "demo (left out)" and got["Other Game (USA).nes"].startswith("new")
+
+
+def test_disc_games_get_one_folder_for_all_their_discs(tmp_path):
+    from app.core.inbox import place
+    ps2 = tmp_path / "ps2"
+    assert place(ps2, "Game (USA) (Disc 2).iso", own=True) == str(ps2 / "Game (USA)" / "Game (USA) (Disc 2).iso")
+    assert place(ps2, "Game (USA) (Disc 1)", folder=True, region="USA") == str(ps2 / "USA" / "Game (USA)")
+    assert place(ps2, "Solo (Europe).iso", own=True, region="Europe") == str(ps2 / "Europe" / "Solo (Europe)" / "Solo (Europe).iso")
