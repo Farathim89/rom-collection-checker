@@ -1,6 +1,9 @@
-"""Cue sheets for CloneCD discs (.ccd + .img + .sub): emulators like DuckStation open a .cue, not a .ccd. The .img is
-the raw disc (2352-byte sectors, like a .bin), so a cue that names it - with the tracks the .ccd lists - is all it
-takes; nothing is converted."""
+"""Missing cue sheets, written so emulators (DuckStation …) and MediaDeck see the disc as one game - nothing is
+converted:
+  - a CloneCD disc (.ccd + .img + .sub): the .img is the raw disc (2352-byte sectors, like a .bin); the .cue names it
+    with the tracks the .ccd lists
+  - a disc of "(Track N).bin" files without a cue: track 1 data (its mode from the sector header), the others music;
+    a music track that starts with 2 seconds of silence holds its gap (INDEX 00 / 01), else the cue adds it (PREGAP)"""
 from __future__ import annotations
 
 import re
@@ -35,9 +38,50 @@ def ccd_to_cue(ccd: Path, img_name: str) -> str | None:
     return "\n".join(lines) + "\n"
 
 
+_TRACK = re.compile(r"^(.*?)\s*\(Track (\d+)\)$", re.I)
+_GAP = 150 * 2352                        # 2 seconds of raw sectors
+
+
+def _track_mode(path: Path) -> str:
+    with open(path, "rb") as f:
+        head = f.read(16)
+    if head[:12] == b"\x00" + b"\xff" * 10 + b"\x00":    # a data sector: sync, address, mode
+        return f"MODE{head[15]}/2352" if head[15] in (1, 2) else "MODE2/2352"
+    return "AUDIO"
+
+
+def tracks_to_cue(tracks: list[Path]) -> str:
+    lines = []
+    for i, t in enumerate(tracks, 1):
+        lines.append(f'FILE "{t.name}" BINARY')
+        mode = _track_mode(t) if i == 1 else "AUDIO"
+        lines.append(f"  TRACK {i:02d} {mode}")
+        if mode != "AUDIO" or i == 1:
+            lines.append("    INDEX 01 00:00:00")
+            continue
+        with open(t, "rb") as f:
+            head = f.read(_GAP)
+        lines += (["    INDEX 00 00:00:00", "    INDEX 01 00:02:00"] if len(head) == _GAP and not any(head)
+                  else ["    PREGAP 00:02:00", "    INDEX 01 00:00:00"])
+    return "\n".join(lines) + "\n"
+
+
 def ensure_cue(folder: Path) -> list[Path]:
-    """Writes the missing .cue next to every .ccd + .img in the folder; returns the cue sheets made."""
+    """Writes the missing .cue for every CloneCD disc and every "(Track N).bin" disc in the folder (never over a
+    .cue / .gdi / .m3u that is there); returns the cue sheets made."""
     made = []
+    discs: dict[str, list[tuple[int, Path]]] = {}
+    for b in folder.glob("*.bin"):
+        m = _TRACK.match(b.stem)
+        if m:
+            discs.setdefault(m.group(1), []).append((int(m.group(2)), b))
+    has_sheet = any(q.suffix.lower() in (".cue", ".gdi", ".m3u") for q in folder.iterdir())
+    for base, ts in discs.items():
+        nos = sorted(n for n, _ in ts)
+        cue = folder / f"{base}.cue"
+        if not has_sheet and not cue.exists() and len(ts) > 1 and nos == list(range(1, len(ts) + 1)):
+            cue.write_text(tracks_to_cue([b for _, b in sorted(ts)]), encoding="utf-8")
+            made.append(cue)
     for ccd in sorted(folder.glob("*.ccd")):
         img, cue = ccd.with_suffix(".img"), ccd.with_suffix(".cue")
         if img.is_file() and not cue.exists():

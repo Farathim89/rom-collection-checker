@@ -594,3 +594,18 @@ def test_clonecd_gets_a_cue(tmp_path):
     assert made[0].read_text(encoding="utf-8") == ('FILE "Game (Europe).img" BINARY\n  TRACK 01 MODE2/2352\n    INDEX 01 00:00:00\n'
                                                    "  TRACK 02 AUDIO\n    INDEX 00 00:13:25\n    INDEX 01 00:15:25\n")
     assert ensure_cue(tmp_path) == []                                  # never twice, never over a cue
+
+
+def test_track_bins_get_a_cue(tmp_path):
+    from app.core.cue import ensure_cue
+    data = b"\x00" + b"\xff" * 10 + b"\x00" + b"\x00\x02\x00\x02" + b"\x00" * 2336
+    (tmp_path / "Game (Europe) (Track 1).bin").write_bytes(data)
+    (tmp_path / "Game (Europe) (Track 2).bin").write_bytes(b"\x00" * (150 * 2352) + b"\x11" * 2352)   # holds its gap
+    (tmp_path / "Game (Europe) (Track 3).bin").write_bytes(b"\x22" * 2352 * 10)                       # no gap
+    made = ensure_cue(tmp_path)
+    assert [p.name for p in made] == ["Game (Europe).cue"]
+    assert made[0].read_text(encoding="utf-8") == (
+        'FILE "Game (Europe) (Track 1).bin" BINARY\n  TRACK 01 MODE2/2352\n    INDEX 01 00:00:00\n'
+        'FILE "Game (Europe) (Track 2).bin" BINARY\n  TRACK 02 AUDIO\n    INDEX 00 00:00:00\n    INDEX 01 00:02:00\n'
+        'FILE "Game (Europe) (Track 3).bin" BINARY\n  TRACK 03 AUDIO\n    PREGAP 00:02:00\n    INDEX 01 00:00:00\n')
+    assert ensure_cue(tmp_path) == []
