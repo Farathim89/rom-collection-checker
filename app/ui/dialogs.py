@@ -10,7 +10,7 @@ from PySide6.QtGui import QColor, QIcon
 from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QFrame,
                                QGridLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
                                QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QTabWidget, QTableWidget,
-                               QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
+                               QToolButton, QVBoxLayout, QWidget)
 
 from ..config import UNDO, Settings, save_settings
 from ..core.collection import find_folders
@@ -189,40 +189,68 @@ class SettingsDialog(QDialog):
         note.setObjectName("muted")
         v.addWidget(note)
         counts = region_counts(dats.entries(c.dat) for c in CONSOLES if dats.have(c.dat))
-        self.region_tree = QTreeWidget()
-        self.region_tree.setHeaderHidden(True)
+        self.region_boxes: list[tuple[QCheckBox, str]] = []
+        body = QWidget()
+        col = QVBoxLayout(body)
+        col.setSpacing(4)
         for group, raws in REGION_TREE:
-            present = [r for r in raws if counts.get(r)]
+            present = sorted((r for r in raws if counts.get(r)), key=lambda x: -counts[x])
             if not present:
                 continue
-            top = QTreeWidgetItem([f"{group}   -   {sum(counts[r] for r in present):,} games"])
-            top.setFlags(top.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsAutoTristate)
-            f = top.font(0)
+            head = QCheckBox(f"{group}   -   {sum(counts[r] for r in present):,} games")
+            head.setTristate(True)
+            f = head.font()
             f.setBold(True)
-            top.setFont(0, f)
-            self.region_tree.addTopLevelItem(top)
-            for r in sorted(present, key=lambda x: -counts[x]):
-                it = QTreeWidgetItem([f"{r}   -   {counts[r]:,} games" if r != "Other" else
-                                      f"Other / not named   -   {counts[r]:,} games"])
-                it.setData(0, Qt.UserRole, r)
-                it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
-                it.setCheckState(0, Qt.Unchecked if r in s.hidden_regions else Qt.Checked)
-                top.addChild(it)
-            top.setExpanded(group != "World")
-        v.addWidget(self.region_tree, 1)
+            head.setFont(f)
+            col.addSpacing(6)
+            col.addWidget(head)
+            grid = QGridLayout()
+            grid.setContentsMargins(26, 0, 0, 0)
+            grid.setHorizontalSpacing(24)
+            boxes = []
+            rows = (len(present) + 2) // 3                     # 3 columns, filled top to bottom
+            for i, r in enumerate(present):
+                cb = QCheckBox(f"{r}   -   {counts[r]:,} games" if r != "Other" else f"Other / not named   -   {counts[r]:,} games")
+                cb.setChecked(r not in s.hidden_regions)
+                grid.addWidget(cb, i % rows, i // rows)
+                boxes.append(cb)
+                self.region_boxes.append((cb, r))
+            for c in range(3):
+                grid.setColumnStretch(c, 1)
+            col.addLayout(grid)
+
+            def sync(_=None, head=head, boxes=boxes) -> None:
+                on = sum(b.isChecked() for b in boxes)
+                head.blockSignals(True)
+                head.setCheckState(Qt.Checked if on == len(boxes) else Qt.Unchecked if not on else Qt.PartiallyChecked)
+                head.blockSignals(False)
+
+            def set_all(state, boxes=boxes, sync=sync) -> None:
+                want = state != 0                    # unticked -> all off; partly or fully ticked -> all on
+                for b in boxes:
+                    b.blockSignals(True)
+                    b.setChecked(want)
+                    b.blockSignals(False)
+                sync()
+
+            head.stateChanged.connect(set_all)
+            for cb in boxes:
+                cb.toggled.connect(sync)
+            sync()
+        col.addStretch()
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setWidget(body)
+        v.addWidget(scroll, 1)
         row = QHBoxLayout()
-        for text, fn in (("Select all", lambda st: Qt.Checked), ("Select none", lambda st: Qt.Unchecked),
-                         ("Invert", lambda st: Qt.Unchecked if st == Qt.Checked else Qt.Checked)):
+        for text, fn in (("Select all", lambda on: True), ("Select none", lambda on: False), ("Invert", lambda on: not on)):
             b = QPushButton(text)
-            b.clicked.connect(lambda _=False, f=fn: [c.setCheckState(0, f(c.checkState(0))) for c in self._region_items()])
+            b.clicked.connect(lambda _=False, f=fn: [c.setChecked(f(c.isChecked())) for c, _r in self.region_boxes])
             row.addWidget(b)
         row.addStretch()
         v.addLayout(row)
         return page
-
-    def _region_items(self) -> list:
-        t = self.region_tree
-        return [t.topLevelItem(i).child(j) for i in range(t.topLevelItemCount()) for j in range(t.topLevelItem(i).childCount())]
 
     def _get_extra(self, ex) -> None:
         if ex is None:
@@ -274,7 +302,7 @@ class SettingsDialog(QDialog):
             s.quick_check = self.quick.isChecked()
             self.rescan = True
         s.check_updates = self.auto_update.isChecked()
-        hidden = [c.data(0, Qt.UserRole) for c in self._region_items() if c.checkState(0) != Qt.Checked]
+        hidden = [r for c, r in self.region_boxes if not c.isChecked()]
         if sorted(hidden) != sorted(s.hidden_regions):
             s.hidden_regions = hidden
             from ..core import dat as dat_mod  # noqa: PLC0415
