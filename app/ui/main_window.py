@@ -456,7 +456,18 @@ class MainWindow(QMainWindow):
             it = self.menu.itemAt(ev.position().toPoint())
             key = str(it.data(Qt.UserRole) or "") if it else ""
             if key.startswith("maker:"):
-                self.collapsed ^= {key[6:]}
+                if ev.button() == Qt.RightButton:            # fold / unfold every maker
+                    makers = {str(self.menu.item(i).data(Qt.UserRole))[6:] for i in range(self.menu.count())
+                              if str(self.menu.item(i).data(Qt.UserRole) or "").startswith("maker:")}
+                    menu = QMenu(self)
+                    menu.addAction("Fold all")
+                    menu.addAction("Unfold all")
+                    pick = menu.exec(ev.globalPosition().toPoint())
+                    if pick is None:
+                        return True
+                    self.collapsed = set(makers) if pick.text() == "Fold all" else set()
+                else:
+                    self.collapsed ^= {key[6:]}
                 ui_settings().setValue("collapsed", "|".join(sorted(self.collapsed)))
                 self.fold_makers()
                 return True
@@ -489,7 +500,7 @@ class MainWindow(QMainWindow):
                 head = QListWidgetItem()
                 head.setFlags(Qt.NoItemFlags)
                 head.setData(Qt.UserRole, f"maker:{maker}")
-                head.setToolTip("Click to fold / unfold")
+                head.setToolTip("Click to fold / unfold - right-click: fold all / unfold all")
                 self.menu.addItem(head)
             text = f" {c.name}"
             if r:
