@@ -391,8 +391,8 @@ QWidget#toolspage {{ background: {p.bg}; }}
 QLabel#pagetitle {{ color: {p.accent}; font-size: 16pt; font-weight: bold; }}
 QListWidget#sidemenu {{ background: {p.panel}; border: 1px solid {p.border}; border-radius: 10px; padding: 6px;
                         outline: none; }}
-QListWidget#sidemenu::item {{ padding: 7px 8px; border-radius: 6px; color: {p.text}; }}
-QListWidget#sidemenu::item:disabled {{ color: {p.muted}; padding-top: 12px; }}
+QListWidget#sidemenu::item {{ padding: 3px 8px; border-radius: 6px; color: {p.text}; }}
+QListWidget#sidemenu::item:disabled {{ color: {p.muted}; padding-top: 10px; }}
 QListWidget#sidemenu::item:hover:!disabled {{ background: {p.field}; color: {p.accent}; }}
 QListWidget#sidemenu::item:selected {{ background: {p.selection}; color: {p.accent}; font-weight: bold; }}
 QFrame#card {{ background: {p.panel}; border: 1px solid {p.border}; border-radius: 10px; }}
