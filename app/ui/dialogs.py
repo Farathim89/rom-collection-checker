@@ -170,7 +170,10 @@ class SettingsDialog(QDialog):
         self.hacks.setChecked(s.take_hacks)
         self.unknown = QCheckBox("Sort in dumps No-Intro doesn't list (homebrew, multicarts, translations)")
         self.unknown.setChecked(s.take_unknown)
-        for cb in (self.unpack, self.names, self.hacks, self.unknown):
+        self.by_region = QCheckBox("Put sorted games in a folder per region (USA, Japan, Germany …; a game from "
+                                   "several regions goes to World)")
+        self.by_region.setChecked(s.region_folders)
+        for cb in (self.unpack, self.names, self.hacks, self.unknown, self.by_region):
             form.addRow(cb)
         form.addRow(QLabel("Bad dumps [b] and games you already have are never moved."))
 
@@ -319,6 +322,7 @@ class SettingsDialog(QDialog):
         found = find_folders(s.games_root, s.folders)
         s.consoles = [] if set(ticked) == set(found) else ticked
         s.unpack, s.official_names = self.unpack.isChecked(), self.names.isChecked()
+        s.region_folders = self.by_region.isChecked()
         s.take_hacks, s.take_unknown = self.hacks.isChecked(), self.unknown.isChecked()
         s.sevenzip, s.winrar_dir = self.seven.text().strip(), self.winrar.text().strip()
         s.dolphin_tool = self.dolphin.text().strip()
@@ -365,7 +369,7 @@ class SortDialog(QDialog):
         opts.addWidget(self.only_moves)
         opts.addStretch()
         mk = QPushButton("📁  Make console folders in the inbox")
-        mk.setToolTip("Empty maker\console folders (laid out like your collection). A game you put in one is sorted to "
+        mk.setToolTip("Empty maker\\console folders (laid out like your collection). A game you put in one is sorted to "
                       "that console, also when its file type (.bin, .rom) could be several consoles.")
         mk.clicked.connect(self.make_folders)
         opts.addWidget(mk)
@@ -469,6 +473,7 @@ class SortDialog(QDialog):
                     pass
             return make_plan(inbox, folders, have, m.dats, tools, s.games_root, have_games=have_games, unpack=s.unpack,
                              official_names=s.official_names, take_hacks=s.take_hacks, take_unknown_dumps=s.take_unknown,
+                             region_folders=s.region_folders,
                              progress=w.signals.progress.emit, stop=lambda: w.stop)
 
         def done(plan) -> None:

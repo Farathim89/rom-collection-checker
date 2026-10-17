@@ -460,3 +460,23 @@ def test_identical_files_no_intro_does_not_list_are_duplicates(tmp_path):
     (games / "Other.nes").write_bytes(b"NES\x1a" + b"\2" * 64)
     r = scan_console(BY_KEY["nes"], [str(games)], _store(tmp_path), hashing.Tools(), ScanCache(tmp_path / "c.json"), [])
     assert [sorted(fs) for fs in r.duplicates.values()] == [sorted([str(games / "Homebrew.nes"), str(games / "Homebrew (2).nes")])]
+
+
+def test_region_folders(tmp_path):
+    from app.core.inbox import place, region_folder
+    assert region_folder("Lufia (Europe)") == "Europe"
+    assert region_folder("Tetris (USA, Europe)") == "World"
+    assert region_folder("Pokemon Snap (World)") == "World"
+    assert region_folder("Snowboard Kids (Europe, Australia)") == "Europe"
+    assert region_folder("Rugby (Germany, Austria)") == "Germany"
+    assert region_folder("Sonic (Japan, USA)") == "World"
+    assert region_folder("Top Racer (Japan) (En)") == "Japan"
+    assert region_folder("Homebrew Thing") == ""
+    con = tmp_path / "snes"
+    con.mkdir()
+    assert place(con, "Lufia (Europe).sfc", region="Europe") == str(con / "Europe" / "Lufia (Europe).sfc")
+    wii = tmp_path / "wii"
+    (wii / "Japan" / "A Game").mkdir(parents=True)
+    (wii / "Japan" / "A Game" / "A Game.wbfs").write_bytes(b"")
+    name = "Zelda (Europe).wbfs"
+    assert place(wii, name, region="Europe") == str(wii / "Europe" / "Zelda (Europe)" / name)

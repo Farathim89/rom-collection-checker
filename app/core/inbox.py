@@ -13,7 +13,7 @@ from pathlib import Path
 
 from .collection import _TRACK, index, match_by_name, name_index, walk_files
 from .consoles import ARCHIVES, BY_KEY, CONSOLES, Console, consoles_for_ext
-from .dat import DatStore
+from .dat import REGION_OF, DatStore, regions_of
 from .hashing import Tools, file_items
 from .probe import QUICK_CONSOLES, identify, probe, serial_index
 
@@ -102,18 +102,49 @@ def make_console_folders(inbox: str, folders: dict[str, list[str]], games_root: 
     return made
 
 
-def place(dest: Path, filename: str, folder: bool = False) -> str:
-    """Where a game goes: the console folder, in a folder of its own when the games there each have one
-    (Wii / GameCube: Game/Game.wbfs). folder: the target is a folder already (a disc of several files)."""
-    d = dest
-    if not folder and d.is_dir():
+REGION_NAMES = set(REGION_OF) | {"World"}
+REGION_FOLDERS = [False]          # make_plan(region_folders=...): sorted games go into <console>\<region>\
+
+
+def region_folder(game: str) -> str:
+    """The region folder of a No-Intro / Redump name: its region (Japan, Germany …), or its first one when all its
+    regions are of one group ("Europe, Australia" -> Europe); World when they span groups ("USA, Europe") or the
+    name says World; "" when the name has no region."""
+    rs = [r for r in regions_of(game) if r in REGION_NAMES]
+    if not rs:
+        return ""
+    return rs[0] if len({REGION_OF.get(r, r) for r in rs}) == 1 else "World"
+
+def _game_dirs(dest: Path) -> list[Path]:
+    """The folders under a console folder that could be one game's own folder (also inside region folders)."""
+    out = []
+    for q in dest.iterdir():
+        if q.is_dir() and not q.name.startswith(("0 - ", "_")):
+            out += [r for r in q.iterdir() if r.is_dir()] if q.name in REGION_NAMES else [q]
+    return out
+
+
+def place(dest: Path, filename: str, folder: bool = False, region: str = "") -> str:
+    """Where a game goes: the console folder (its region folder in it, when sorting by region), in a folder of its
+    own when the games there each have one (Wii / GameCube: Game/Game.wbfs). folder: the target is a folder
+    already (a disc of several files)."""
+    d = dest / region if region else dest
+    if not folder and dest.is_dir():
         ext = Path(filename).suffix.lower()
-        subs = [q for q in d.iterdir() if q.is_dir() and not q.name.startswith(("0 - ", "_"))]
-        if subs and not any(q.is_file() and q.suffix.lower() == ext for q in d.iterdir()) and any(
-                r.suffix.lower() == ext for q in subs[:20] for r in q.iterdir() if r.is_file()):
+        subs = _game_dirs(dest)
+        tops = [dest] + [q for q in dest.iterdir() if q.is_dir() and q.name in REGION_NAMES]
+        loose = any(q.is_file() and q.suffix.lower() == ext for t in tops for q in t.iterdir())
+        if subs and not loose and any(r.suffix.lower() == ext for q in subs[:20] for r in q.iterdir() if r.is_file()):
             d = d / Path(filename).stem
     return str(d / filename)
 
+
+def console_dest(c: Console, folders: dict[str, list[str]], games_root: str) -> Path:
+    return Path((folders.get(c.key) or [str(Path(games_root) / c.maker / c.folders[0])])[0])
+
+
+def region_of_step(game: str) -> str:
+    return region_folder(game) if REGION_FOLDERS[0] and game else ""
 
 @dataclass
 class Step:
@@ -152,8 +183,10 @@ class Plan:
 def make_plan(inbox: str, folders: dict[str, list[str]], have_crcs: dict[str, set[str]], dats: DatStore,
               tools: Tools, games_root: str, *, have_games: dict[str, set[str]] | None = None, unpack=True,
               official_names=True, take_hacks=False,
-              take_unknown_dumps=True, progress=lambda t: None, stop=lambda: False) -> Plan:
-    """have_crcs: console key -> every CRC variant of the games you already have."""
+              take_unknown_dumps=True, region_folders=False, progress=lambda t: None, stop=lambda: False) -> Plan:
+    """have_crcs: console key -> every CRC variant of the games you already have. region_folders: games go into
+    <console>/<region>/ (Japan, Germany …; World when released in several)."""
+    REGION_FOLDERS[0] = region_folders
     plan = Plan(inbox)
     _DATS_FOR_BIG[:] = [dats]
     ixs = {c.key: index(dats.entries(c.dat)) for c in CONSOLES if dats.have(c.dat)}
@@ -274,7 +307,7 @@ def make_plan(inbox: str, folders: dict[str, list[str]], have_crcs: dict[str, se
             st.action, st.reason = "move", ("new (by name)" if st.by_name else "new (identified by header)"
                                             if st.by_header else "new") if st.game else (
                 "translation" if TRANSLATION.search(name) else not_in)
-            dest = Path((folders.get(c.key) or [str(Path(games_root) / c.maker / c.folders[0])])[0])
+            dest = console_dest(c, folders, games_root)
             if c.keep_archives and it.inner and len(items) == 1:   # one game per archive: it stays packed
                 st.unpack = False
             if it.inner and not st.unpack:          # the archive itself moves (DS .7z)
@@ -283,7 +316,7 @@ def make_plan(inbox: str, folders: dict[str, list[str]], have_crcs: dict[str, se
                 base, ext = Path(name).stem, Path(name).suffix
             if st.game and official_names:
                 base = st.game
-            st.target = place(dest, SAFE.sub("_", base) + ext.lower())
+            st.target = place(dest, SAFE.sub("_", base) + ext.lower(), region=region_of_step(st.game))
     _join_discs(plan, folders, games_root, official_names)
     return plan
 
@@ -328,10 +361,10 @@ def _decide(st: Step, name: str, ext: str, have_games, seen_games, folders, game
         return
     seen_games[(st.console, st.game)] = st.label
     c = BY_KEY[st.console]
-    dest = Path((folders.get(c.key) or [str(Path(games_root) / c.maker / c.folders[0])])[0])
+    dest = console_dest(c, folders, games_root)
     base = st.game if official_names else Path(name).stem
     st.action, st.reason = "move", "new (identified by header)"
-    st.target = place(dest, SAFE.sub("_", base) + ext)
+    st.target = place(dest, SAFE.sub("_", base) + ext, region=region_of_step(st.game))
 
 
 DESCRIPTORS = ("cue", "gdi", "m3u", "ccd", "sub", "img", "mds")
@@ -362,21 +395,22 @@ def _join_discs(plan: Plan, folders: dict[str, list[str]], games_root: str, offi
         if lead is None:
             continue
         game = next((s.game for s in steps if s.game and not s.by_name), "") or next((s.game for s in steps if s.game), "")
-        dest = Path((folders.get(key) or [str(Path(games_root) / c.maker / c.folders[0])])[0])
+        dest = console_dest(c, folders, games_root)
+        reg = region_of_step(game)
         name = SAFE.sub("_", game if game and official_names else
                         (Path(lead.source).stem if lead.inner else disc_base(lead.source)))
         if lead.inner:
             if len(steps) > 1 or Path(lead.inner).suffix.lower().lstrip(".") in ("bin", "raw"):
-                lead.unpack_all, lead.target = True, place(dest, name, folder=True)
+                lead.unpack_all, lead.target = True, place(dest, name, folder=True, region=reg)
         else:
             src_dir = Path(lead.source).parent
             files = sorted({s.source for s in steps} | {
                 str(q) for q in src_dir.iterdir() if q.is_file() and q.suffix.lower().lstrip(".") in DESCRIPTORS
                 and disc_base(q.name).lower() == base})
             if len(files) > 1:
-                lead.files, lead.target = files, place(dest, name, folder=True)
+                lead.files, lead.target = files, place(dest, name, folder=True, region=reg)
             else:
-                lead.target = place(dest, name + Path(lead.source).suffix.lower())
+                lead.target = place(dest, name + Path(lead.source).suffix.lower(), region=reg)
         lead.game = game or lead.game
         for s in steps:
             if s is not lead:
@@ -593,3 +627,37 @@ def recycle(p: Path) -> None:
 
 def plan_to_json(plan: Plan) -> str:
     return json.dumps({"inbox": plan.inbox, "steps": [asdict(s) for s in plan.steps]}, ensure_ascii=False)
+
+
+def region_moves(res, root: Path) -> list[tuple[Path, Path]]:
+    """Your games of one console into <console>/<region>/: (from, to) for each game - a loose file with the files
+    of the same name next to it (its save, a .cue's tracks), or a game's own folder (a disc, a Wii game).
+    Games in 0 - folders and files No-Intro doesn't list stay where they are."""
+    if res.console.source == "titledb":                  # Switch: every title is "World"
+        return []
+    units: dict[Path, str] = {}
+    for t in res.titles.values():
+        for game, labels in t.have.items():
+            reg = region_folder(game)
+            for label in labels:
+                p = Path(label.split(" › ")[0])
+                try:
+                    parts = p.relative_to(root).parts
+                except ValueError:
+                    continue
+                if not reg or parts[0].startswith(("0 - ", "_")):
+                    continue
+                inner = parts[1:] if parts[0] in REGION_NAMES and len(parts) > 1 else parts
+                top = root / parts[0] if inner is parts else root / parts[0] / inner[0]
+                units.setdefault(top if len(inner) > 1 else p, reg)
+    moves, taken = [], set()
+    for src, reg in units.items():
+        group = [src] if src.is_dir() else [q for q in src.parent.iterdir() if q.is_file() and
+                                              disc_base(q.name).lower() == disc_base(src.name).lower()]
+        for q in group:
+            dst = root / reg / q.name
+            if q.parent == dst.parent or q in taken:
+                continue
+            taken.add(q)
+            moves.append((q, dst))
+    return moves
