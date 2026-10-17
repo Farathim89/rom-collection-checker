@@ -18,6 +18,7 @@ DATS = STATE / "dats"
 UNDO = STATE / "undo"
 CACHE = STATE / "scan-cache.json"
 DOWNLOADS = STATE / "downloads.json"
+XEMID = STATE / "xemid.json"         # Xbox 360 releases asked from redump.org
 EXTRA = STATE / "extra-dats"          # TOSEC / hacks / homebrew lists
 
 
@@ -43,6 +44,7 @@ class Settings:
     download_folder: str = ""            # where downloads go ("" = the inbox)
     download_parallel: int = 3           # downloads at the same time
     sort_after_downloads: bool = False   # open Sort inbox when the queue is done
+    ask_redump: bool = False             # Xbox 360: ask redump.org which release a disc is (sends its title)
     quick_check: bool = True             # discs, DS, N64: named by their header (Verify does the full checksum)
     tidy_inbox: bool = True              # after a sort: what you now have -> _Duplicates, empty folders go
     check_updates: bool = True           # look for a new version on GitHub at every start (at most hourly)

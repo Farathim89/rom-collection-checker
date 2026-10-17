@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QFileDialog, QFrame
                                QTableWidgetItem, QTabWidget, QToolButton, QVBoxLayout, QWidget)
 
 from .. import __version__
-from ..config import CACHE, DATS, EXTRA, Settings, load_settings, save_settings
+from ..config import CACHE, DATS, EXTRA, XEMID, Settings, load_settings, save_settings
 from ..core.collection import ConsoleResult, ScanCache, find_folders, scan_console, wrong_console
 from ..core.consoles import BY_KEY, CONSOLES
 from ..core.dat import REGION_KEYS, DatStore
@@ -137,6 +137,7 @@ class MainWindow(QMainWindow):
         self.dats = DatStore(DATS)
         from ..core import dat as dat_mod  # noqa: PLC0415
         dat_mod.HIDDEN_REGIONS = set(self.s.hidden_regions)
+        self.apply_online()
         self.extra = ExtraStore(EXTRA)
         self.cache = ScanCache(CACHE)
         self.results: dict[str, ConsoleResult] = {}
@@ -868,6 +869,10 @@ class MainWindow(QMainWindow):
             Path(path).write_text("\n".join(lines) + "\n", encoding="utf-8")
             self.status.setText(f"Saved {path}")
 
+    def apply_online(self) -> None:
+        from ..core import xemid  # noqa: PLC0415
+        xemid.ONLINE[0], xemid.CACHE[0] = self.s.ask_redump, XEMID
+
     def open_settings(self) -> None:
         from .dialogs import SettingsDialog  # noqa: PLC0415
         before = theme.current()
@@ -875,6 +880,7 @@ class MainWindow(QMainWindow):
         d.preview.connect(lambda name: theme.apply(name))
         if d.exec():
             save_settings(self.s)
+            self.apply_online()
             theme.apply(self.s.theme)
             self.fill_menu()
             if getattr(d, "regions_changed", False):

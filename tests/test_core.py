@@ -432,7 +432,7 @@ def test_xbox360_title_id_from_default_xex(tmp_path):
     p = tmp_path / "forza.iso"
     p.write_bytes(bytes(img))
     pr = probe(p, "x360")
-    assert (pr.serial, pr.version, pr.disc) == ("MS2505", -1, 1)     # its version is not Redump's revision
+    assert (pr.serial, pr.version, pr.disc, pr.sku) == ("MS2505", -1, 1, 7)   # its version is the XeMID release number
     p.write_bytes(bytes(48 * 2048))                                # not an Xbox disc
     assert probe(p, "x360") is None
 
@@ -509,3 +509,16 @@ def test_header_named_discs_get_their_name_and_folder(tmp_path):
     assert (tmp_path / "Wii" / "Zelda (Europe)" / "Zelda (Europe).wbfs").exists() and not problems
     undo(log)
     assert (g / "zelda.wbfs").exists()
+
+
+def test_xbox360_release_by_xemid(tmp_path):
+    import json
+    from app.core import xemid
+    f = tmp_path / "xemid.json"
+    f.write_text(json.dumps({"MS2505": [[["Europe"], "MS250507W0CF11"], [["Europe", "Asia"], "MS250504W07F11"],
+                                        [["USA"], "MS250506W0AF11"]]}), encoding="utf-8")
+    xemid.CACHE[0], xemid.ONLINE[0] = f, False          # from the cache, never online in a test
+    games = ["Forza Horizon (Europe) (En)", "Forza Horizon (Europe, Asia) (En)", "Forza Horizon (USA) (En)"]
+    assert xemid.pick(games, "Forza Horizon", "MS2505", 4) == ["Forza Horizon (Europe, Asia) (En)"]
+    assert xemid.pick(games, "Forza Horizon", "MS2505", 9) == games      # unknown release: all stay
+    xemid.CACHE[0] = None

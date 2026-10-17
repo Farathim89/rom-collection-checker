@@ -28,6 +28,7 @@ class Probe:
     version: int = -1    # revision number from the header (-1 = the header has none)
     disc: int = 0        # disc number (GameCube / Wii)
     region: str = ""     # region letter of a 4-character game ID (E = USA, P = Europe, J = Japan …)
+    sku: int = 0         # Xbox 360: the release number (the SKU digits of its XeMID: 07 = Forza Horizon Europe)
 
 
 def norm_serial(s: str) -> str:
@@ -244,11 +245,11 @@ def _xbox360(p: Path) -> Probe | None:
         for k in range(min(count, 64)):
             key, val = struct.unpack_from(">II", x, 0x18 + k * 8)
             if key == 0x00040006 and val + 24 <= len(x):      # execution info
-                _media, _version, _base, tid = struct.unpack_from(">IIII", x, val)
+                _media, version, _base, tid = struct.unpack_from(">IIII", x, val)
                 disc = x[val + 18]
                 pub = bytes([(tid >> 24) & 0xFF, (tid >> 16) & 0xFF]).decode("latin1")
                 if re.fullmatch(r"[A-Z0-9]{2}", pub):
-                    return Probe(f"{pub}{tid & 0xFFFF:03d}", disc=max(0, disc - 1))   # (not Redump's revision)
+                    return Probe(f"{pub}{tid & 0xFFFF:03d}", disc=max(0, disc - 1), sku=version & 0xFF)
     return None
 
 
@@ -384,6 +385,9 @@ def candidates(pr: Probe, index: dict, p: Path | None = None, size: int = 0) -> 
     if p is not None:                             # best first: the same title as the file ("Halo (Japan)" last)
         want = _plain_title(p.stem)
         plain.sort(key=lambda g: _plain_title(g) != want)
+    if pr.sku and len(plain) > 1:                 # Xbox 360: its release number, against redump.org's XeMIDs
+        from .xemid import pick  # noqa: PLC0415
+        plain = pick(plain, re.sub(r"\s*\(.*$", "", plain[0]).strip(), pr.serial, pr.sku)
     return plain
 
 

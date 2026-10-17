@@ -208,6 +208,10 @@ class SettingsDialog(QDialog):
                                "the Verify button on a console does the full checksum check")
         self.quick.setChecked(s.quick_check)
         form.addRow("Quick check", self.quick)
+        self.redump = QCheckBox("Xbox 360: when a disc fits several releases, ask redump.org which one it is "
+                                "(sends the game's title; asked once per game)")
+        self.redump.setChecked(s.ask_redump)
+        form.addRow("", self.redump)
         self.auto_update = QCheckBox("Look for a new version of the checker at every start (asks before updating)")
         self.auto_update.setChecked(s.check_updates)
         form.addRow("Updates", self.auto_update)
@@ -330,6 +334,7 @@ class SettingsDialog(QDialog):
             s.quick_check = self.quick.isChecked()
             self.rescan = True
         s.check_updates = self.auto_update.isChecked()
+        s.ask_redump = self.redump.isChecked()
         hidden = [r for c, r in self.region_boxes if not c.isChecked()]
         if sorted(hidden) != sorted(s.hidden_regions):
             s.hidden_regions = hidden
