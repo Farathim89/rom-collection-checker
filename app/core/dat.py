@@ -95,12 +95,16 @@ def tags(name: str) -> list[str]:
     return _TAG.findall(name)
 
 
+# Tools the lists don't tag (Program): Nintendo's Wide-Boy64 adapters, cheat cartridges, test cartridges - not games
+TOOLS = re.compile(r"^(Wide-Boy ?64|Game ?Shark|(Pro )?Action Replay|Xploder|Xplorer ?64|Game Genie|Datel)\b"
+                   r"|\b(Test Cartridge|Test Cassette|Test Program|Burn-in Test|Controller Test)\b", re.I)
+
 def kind_of(game: str, rom: str) -> str:
     all_tags = [part.strip() for t in tags(game) + tags(rom) for part in t.split(",")]
     for kind, pat in KINDS:
         if any(pat.search(t) for t in all_tags):
             return kind
-    if game.startswith("[BIOS]"):
+    if game.startswith("[BIOS]") or TOOLS.search(title_of(game)):
         return "program"
     return "game"
 

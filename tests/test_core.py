@@ -547,3 +547,9 @@ def test_trimmed_and_overdumped_roms_are_fixed(tmp_path):
     out = gba / "Trim Test (USA).gba"
     assert not problems and out.read_bytes() == rom
     assert (inbox / "trim test.gba").exists() and (inbox / "Trim Test (USA) [o].gba").exists()   # originals stay
+
+
+def test_tools_are_not_games():
+    assert dat.kind_of("Wide-Boy64 AGB (World) (v0.04c)", "x.z64") == "program"
+    assert dat.kind_of("Controller Test Cassette (Japan)", "x.sfc") == "program"
+    assert dat.kind_of("Codebreaker (USA)", "x.a26") == "game"          # a real game
