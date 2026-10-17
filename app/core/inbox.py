@@ -13,7 +13,7 @@ from pathlib import Path
 
 from .collection import _TRACK, index, match_by_name, name_index, walk_files
 from .consoles import ARCHIVES, BY_KEY, CONSOLES, Console, consoles_for_ext
-from .dat import REGION_NAMES, DatStore, common_region, region_folder  # noqa: F401
+from .dat import REGION_NAMES, DatStore, common_region, kind_of, region_folder  # noqa: F401
 from .hashing import Tools, file_items
 from . import repair
 from .probe import QUICK_CONSOLES, identify, probe, serial_index
@@ -103,6 +103,7 @@ def make_console_folders(inbox: str, folders: dict[str, list[str]], games_root: 
     return made
 
 
+DEMO_TAG = re.compile(r"\((Demo|Kiosk|Sample|Trial)\b[^)]*\)", re.I)   # a file the list doesn't know: by its name
 REGION_FOLDERS = [False]          # make_plan(region_folders=...): sorted games go into <console>\<region>\
 
 def _game_dirs(dest: Path) -> list[Path]:
@@ -176,7 +177,8 @@ class Plan:
 def make_plan(inbox: str, folders: dict[str, list[str]], have_crcs: dict[str, set[str]], dats: DatStore,
               tools: Tools, games_root: str, *, have_games: dict[str, set[str]] | None = None, unpack=True,
               official_names=True, take_hacks=False,
-              take_unknown_dumps=True, region_folders=False, progress=lambda t: None, stop=lambda: False) -> Plan:
+              take_unknown_dumps=True, region_folders=False, take_demos=True, progress=lambda t: None,
+              stop=lambda: False) -> Plan:
     """have_crcs: console key -> every CRC variant of the games you already have. region_folders: games go into
     <console>/<region>/ (Japan, Germany …; World when released in several)."""
     REGION_FOLDERS[0] = region_folders
@@ -281,7 +283,10 @@ def make_plan(inbox: str, folders: dict[str, list[str]], have_crcs: dict[str, se
                     e, size, pad = got
                     st.game, st.fix_size, st.fix_pad, st.fix_crc = e.game, size, pad.hex(), e.crc
                     it.crcs.append(e.crc)
-            if any(x in have_crcs.get(st.console, set()) for x in it.crcs) or                     (st.game and not st.by_name and st.game in (have_games or {}).get(st.console, ())):
+            if not take_demos and (kind_of(st.game, "") == "demo" if st.game else bool(DEMO_TAG.search(name))):
+                st.reason = "demo (left out)"     # Settings → Sorting: demos, kiosk and magazine discs stay in the inbox
+                continue
+            if any(x in have_crcs.get(st.console, set()) for x in it.crcs) or                    (st.game and not st.by_name and st.game in (have_games or {}).get(st.console, ())):
                 st.reason = "you have it"      # by checksum, or the same game named by its header in your folder
                 continue
             if st.by_name and st.game in (have_games or {}).get(st.console, ()):

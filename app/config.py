@@ -37,6 +37,7 @@ class Settings:
     official_names: bool = True          # sorted games get their No-Intro name
     take_hacks: bool = False             # hacks are sorted in too (translations always are)
     take_unknown: bool = True            # dumps No-Intro doesn't list (homebrew, translations, multicarts)
+    take_demos: bool = True              # demos, kiosk and magazine discs are sorted in too (off: they stay)
     region_folders: bool = False         # sorted games go into <console>\<region>\ (World when from several)
     sevenzip: str = ""                   # 7z.exe / 7za.exe (found by itself when empty)
     winrar_dir: str = ""                 # WinRAR's folder (found by itself when empty)

@@ -170,10 +170,12 @@ class SettingsDialog(QDialog):
         self.hacks.setChecked(s.take_hacks)
         self.unknown = QCheckBox("Sort in dumps No-Intro doesn't list (homebrew, multicarts, translations)")
         self.unknown.setChecked(s.take_unknown)
+        self.demos = QCheckBox("Also sort in demos (kiosk, sampler and magazine demo discs too) - off: they stay in the inbox")
+        self.demos.setChecked(s.take_demos)
         self.by_region = QCheckBox("Put sorted games in a folder per region (USA, Japan, Germany …; a game from "
                                    "several regions goes to World)")
         self.by_region.setChecked(s.region_folders)
-        for cb in (self.unpack, self.names, self.hacks, self.unknown, self.by_region):
+        for cb in (self.unpack, self.names, self.hacks, self.unknown, self.demos, self.by_region):
             form.addRow(cb)
         form.addRow(QLabel("Bad dumps [b] and games you already have are never moved."))
 
@@ -327,6 +329,7 @@ class SettingsDialog(QDialog):
         s.consoles = [] if set(ticked) == set(found) else ticked
         s.unpack, s.official_names = self.unpack.isChecked(), self.names.isChecked()
         s.region_folders = self.by_region.isChecked()
+        s.take_demos = self.demos.isChecked()
         s.take_hacks, s.take_unknown = self.hacks.isChecked(), self.unknown.isChecked()
         s.sevenzip, s.winrar_dir = self.seven.text().strip(), self.winrar.text().strip()
         s.dolphin_tool = self.dolphin.text().strip()
@@ -478,7 +481,7 @@ class SortDialog(QDialog):
                     pass
             return make_plan(inbox, folders, have, m.dats, tools, s.games_root, have_games=have_games, unpack=s.unpack,
                              official_names=s.official_names, take_hacks=s.take_hacks, take_unknown_dumps=s.take_unknown,
-                             region_folders=s.region_folders,
+                             region_folders=s.region_folders, take_demos=s.take_demos,
                              progress=w.signals.progress.emit, stop=lambda: w.stop)
 
         def done(plan) -> None:

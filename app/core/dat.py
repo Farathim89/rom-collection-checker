@@ -99,6 +99,15 @@ def tags(name: str) -> list[str]:
 TOOLS = re.compile(r"^(Wide-Boy ?64|Game ?Shark|(Pro )?Action Replay|Xploder|Xplorer ?64|Game Genie|Datel)\b"
                    r"|\b(Test Cartridge|Test Cassette|Test Program|Burn-in Test|Controller Test)\b", re.I)
 
+# Demo discs the lists don't tag (Demo): magazine discs (Euro Demo, Official PlayStation / Xbox Magazine), kiosk,
+# sampler and trial discs, and titles that end in "Demo" - not "Need for Speed - Underground" or "Doko Demo Issho"
+DEMOS = re.compile(
+    r"\b(Demo ?Dis[ck]s?|Euro Demo|Demo One|Bonus Demo|Selector Demo|Tentou Demo|Kiosk|Sampler|Jampack|Multi-Game Demo|"
+    r"Trial Edition|Taikenban|Preview Dis[ck]|Square's Preview|Dream Preview|Preview Sega Saturn|PlayStation Underground|"
+    r"Official (U\.S\. |Australian |UK )?(PlayStation|Xbox|Sega Dreamcast)( 2| 3)? Magazine|Magazine (Ufficiale|Officiel)|"
+    r"Magazine (Demo|Game Dis[ck])|Xbox Magazine|Demo (Collection|& Trailer)|Game Demos?|Playable (Demo|Starter))\b"
+    r"|(\bdemo\s*$|\[demo\])", re.I)
+
 def kind_of(game: str, rom: str) -> str:
     all_tags = [part.strip() for t in tags(game) + tags(rom) for part in t.split(",")]
     for kind, pat in KINDS:
@@ -106,6 +115,8 @@ def kind_of(game: str, rom: str) -> str:
             return kind
     if game.startswith("[BIOS]") or TOOLS.search(title_of(game)):
         return "program"
+    if DEMOS.search(title_of(game)):
+        return "demo"
     return "game"
 
 

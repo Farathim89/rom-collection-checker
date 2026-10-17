@@ -553,3 +553,24 @@ def test_tools_are_not_games():
     assert dat.kind_of("Wide-Boy64 AGB (World) (v0.04c)", "x.z64") == "program"
     assert dat.kind_of("Controller Test Cassette (Japan)", "x.sfc") == "program"
     assert dat.kind_of("Codebreaker (USA)", "x.a26") == "game"          # a real game
+
+
+def test_demo_discs_are_demos():
+    assert dat.kind_of("Euro Demo 71 (Europe)", "x.bin") == "demo"
+    assert dat.kind_of("Official U.S. PlayStation Magazine Demo Disc 12 (USA)", "x.bin") == "demo"
+    assert dat.kind_of("ARMS Demo (World)", "x.nsp") == "demo"
+    assert dat.kind_of("Need for Speed - Underground (USA)", "x.iso") == "game"
+    assert dat.kind_of("Doko Demo Issho (Japan)", "x.bin") == "game"
+
+
+def test_demos_can_stay_in_the_inbox(tmp_path):
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    (inbox / "Some Game (USA) (Demo).nes").write_bytes(b"NES\x1a" + b"\3" * 64)
+    (inbox / "Other Game (USA).nes").write_bytes(b"NES\x1a" + b"\4" * 64)
+    nes = tmp_path / "games" / "NES"
+    nes.mkdir(parents=True)
+    plan = make_plan(str(inbox), {"nes": [str(nes)]}, {}, _store(tmp_path), hashing.Tools(), str(tmp_path / "games"),
+                     take_demos=False)
+    got = {Path(s.source).name: s.reason for s in plan.steps}
+    assert got["Some Game (USA) (Demo).nes"] == "demo (left out)" and got["Other Game (USA).nes"].startswith("new")
