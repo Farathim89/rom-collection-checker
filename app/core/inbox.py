@@ -15,7 +15,7 @@ from .collection import _TRACK, index, match_by_name, name_index, walk_files
 from .consoles import ARCHIVES, BY_KEY, CONSOLES, Console, consoles_for_ext
 from .dat import REGION_NAMES, DatStore, common_region, kind_of, region_folder  # noqa: F401
 from .hashing import Tools, file_items
-from . import repair
+from . import cue, repair
 from .probe import QUICK_CONSOLES, identify, probe, serial_index
 
 NO_CHECKSUM = {"wbfs", "pbp", "cso", "chd", "cdi", "ciso", "nsp", "nsz", "xci", "xcz"}
@@ -470,6 +470,7 @@ def apply_plan(plan: Plan, tools: Tools, undo_dir: Path, progress=lambda t: None
                     if Path(f).exists():
                         shutil.move(f, t / Path(f).name)
                         done.append({"op": "moved", "from": f, "to": str(t / Path(f).name)})
+                done += [{"op": "created", "path": str(c)} for c in cue.ensure_cue(t)]   # CloneCD: its .cue
                 s.done = True
                 continue
             if s.inner and s.unpack_all:     # a disc in an archive: everything in it into its folder
@@ -487,6 +488,7 @@ def apply_plan(plan: Plan, tools: Tools, undo_dir: Path, progress=lambda t: None
                 for q in got:                # (never over a file that is there)
                     shutil.move(str(q), t / q.name)
                     done.append({"op": "created", "path": str(t / q.name)})
+                done += [{"op": "created", "path": str(c)} for c in cue.ensure_cue(t)]   # CloneCD: its .cue
                 s.done = True
                 continue
             if s.inner and s.unpack:

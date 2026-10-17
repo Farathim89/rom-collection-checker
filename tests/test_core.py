@@ -582,3 +582,15 @@ def test_disc_games_get_one_folder_for_all_their_discs(tmp_path):
     assert place(ps2, "Game (USA) (Disc 2).iso", own=True) == str(ps2 / "Game (USA)" / "Game (USA) (Disc 2).iso")
     assert place(ps2, "Game (USA) (Disc 1)", folder=True, region="USA") == str(ps2 / "USA" / "Game (USA)")
     assert place(ps2, "Solo (Europe).iso", own=True, region="Europe") == str(ps2 / "Europe" / "Solo (Europe)" / "Solo (Europe).iso")
+
+
+def test_clonecd_gets_a_cue(tmp_path):
+    from app.core.cue import ensure_cue
+    (tmp_path / "Game (Europe).img").write_bytes(b"\0" * 2352)
+    (tmp_path / "Game (Europe).ccd").write_text(
+        "[CloneCD]\nVersion=3\n[TRACK 1]\nMODE=2\nINDEX 1=0\n[TRACK 2]\nMODE=0\nINDEX 0=1000\nINDEX 1=1150\n", encoding="latin1")
+    made = ensure_cue(tmp_path)
+    assert [p.name for p in made] == ["Game (Europe).cue"]
+    assert made[0].read_text(encoding="utf-8") == ('FILE "Game (Europe).img" BINARY\n  TRACK 01 MODE2/2352\n    INDEX 01 00:00:00\n'
+                                                   "  TRACK 02 AUDIO\n    INDEX 00 00:13:25\n    INDEX 01 00:15:25\n")
+    assert ensure_cue(tmp_path) == []                                  # never twice, never over a cue
