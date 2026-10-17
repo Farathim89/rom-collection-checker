@@ -17,7 +17,7 @@ from ..core.collection import find_folders
 from ..core.consoles import BY_KEY, CONSOLES
 from ..core.dat import DatStore
 from ..core.hashing import Tools
-from ..core.inbox import HAD, apply_plan, make_console_folders, make_plan, tidy_inbox, undo
+from ..core.inbox import HAD, apply_plan, make_console_folders, make_plan, region_moves, tidy_inbox, undo, write_undo
 from ..core.rename import apply_renames, make_renames
 from . import theme
 from .icons import console_icon, flag_icon
@@ -607,6 +607,76 @@ class RenameDialog(QDialog):
         self.main.scan()
 
 
+class RegionDialog(QDialog):
+    """Your games into a folder per region (<console>/<country>/; World when a game spans groups), with a preview."""
+
+    def __init__(self, main, results):
+        super().__init__(main)
+        self.main = main
+        self.moves = [(r.console.name, a, b) for r in results for a, b in region_moves(r, Path(r.folders[0]))]
+        names = ", ".join(r.console.name for r in results) if len(results) <= 3 else f"{len(results)} consoles"
+        self.setWindowTitle(f"Region folders - {names}")
+        self.resize(1300, 760)
+        v = QVBoxLayout(self)
+        note = QLabel(f"{len(self.moves)} games (and the saves / tracks next to them) can go into a folder per region: "
+                      "Japan, Germany … - World when a game is from regions of different groups (USA, Europe). "
+                      "Folders are made only for regions you have. Games in 0 - folders and files the list doesn't "
+                      "know stay where they are." if self.moves else
+                      "Every game is in its region folder already.")
+        note.setWordWrap(True)
+        note.setObjectName("muted")
+        v.addWidget(note)
+        self.t = table(["", "Console", "Game", "Goes to"], {0: 30, 1: 200, 2: 760}, 3)
+        self.t.setSortingEnabled(False)
+        self.t.setRowCount(len(self.moves))
+        for i, (con, a, b) in enumerate(self.moves):
+            chk = Item("")
+            chk.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            chk.setCheckState(Qt.Checked)
+            chk.setData(Qt.UserRole, i)
+            self.t.setItem(i, 0, chk)
+            self.t.setItem(i, 1, Item(con))
+            self.t.setItem(i, 2, Item(a.name + ("  (folder)" if a.is_dir() else "")))
+            self.t.setItem(i, 3, Item(b.parent.name))
+        self.t.setSortingEnabled(True)
+        v.addWidget(self.t, 1)
+        row = QHBoxLayout()
+        row.addStretch()
+        b = QPushButton("Move")
+        b.setObjectName("primary")
+        b.setEnabled(bool(self.moves))
+        b.clicked.connect(self.apply)
+        close = QPushButton("Close")
+        close.clicked.connect(self.reject)
+        row.addWidget(b)
+        row.addWidget(close)
+        v.addLayout(row)
+
+    def apply(self) -> None:
+        import os  # noqa: PLC0415
+        todo = [self.moves[self.t.item(r, 0).data(Qt.UserRole)] for r in range(self.t.rowCount())
+                if self.t.item(r, 0).checkState() == Qt.Checked]
+        if QMessageBox.question(self, "Region folders", f"Move {len(todo)} games into their region folders? "
+                                "(An undo log is kept.)") != QMessageBox.Yes:
+            return
+        done, problems = [], []
+        for _con, a, b in todo:
+            if b.exists():
+                problems.append(f"in the way, left alone: {b}")
+                continue
+            try:
+                b.parent.mkdir(parents=True, exist_ok=True)
+                os.rename(a, b)                 # never over a file that is there
+                done.append({"op": "moved", "from": str(a), "to": str(b)})
+            except OSError as e:
+                problems.append(f"{a.name}: {e}")
+        log = write_undo(UNDO, "region folders", done)
+        QMessageBox.information(self, "Region folders", f"{len(done)} moved.\nUndo log: {log.name}" +
+                                ("\n\n" + "\n".join(problems[:30]) if problems else ""))
+        self.accept()
+        self.main.scan()
+
+
 class UndoDialog(QDialog):
     def __init__(self, main):
         super().__init__(main)
@@ -615,7 +685,7 @@ class UndoDialog(QDialog):
         self.resize(700, 420)
         v = QVBoxLayout(self)
         v.addWidget(QLabel("Sorts and renames, newest first. Undo puts the files back where they were "
-                           "(copies taken out of archives go to the Recycle Bin, or to undo\removed copies on a drive without one)."))
+                           "(copies taken out of archives go to the Recycle Bin, or to undo\\removed copies on a drive without one)."))
         self.list = QListWidget()
         logs = sorted([p for p in UNDO.glob("*.json") if not p.name.endswith(".undone.json")], reverse=True) \
             if UNDO.is_dir() else []
