@@ -522,3 +522,28 @@ def test_xbox360_release_by_xemid(tmp_path):
     assert xemid.pick(games, "Forza Horizon", "MS2505", 4) == ["Forza Horizon (Europe, Asia) (En)"]
     assert xemid.pick(games, "Forza Horizon", "MS2505", 9) == games      # unknown release: all stay
     xemid.CACHE[0] = None
+
+
+def test_trimmed_and_overdumped_roms_are_fixed(tmp_path):
+    from app.core.inbox import apply_plan
+    rom = bytes(range(256)) * 4096 + b"\xff" * (1 << 20)        # 2 MB: 1 MB of game, 1 MB of 0xFF
+    d = tmp_path / "dats"
+    d.mkdir()
+    (d / "Nintendo - Game Boy Advance.dat").write_text(
+        'clrmamepro (\n\tname "Nintendo - Game Boy Advance"\n)\n\ngame (\n\tname "Trim Test (USA)"\n'
+        f'\trom ( name "Trim Test (USA).gba" size {len(rom)} crc {zlib.crc32(rom) & 0xFFFFFFFF:08X} )\n)\n',
+        encoding="utf-8")
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    (inbox / "trim test.gba").write_bytes(rom[: 1 << 20])          # trimmed: its 0xFF end cut off
+    (inbox / "Trim Test (USA) [o].gba").write_bytes(rom + b"\xff" * (2 << 20))   # an overdump of the same game
+    gba = tmp_path / "games" / "Nintendo" / "GameBoy Advance"
+    gba.mkdir(parents=True)
+    plan = make_plan(str(inbox), {"gba": [str(gba)]}, {}, dat.DatStore(d), hashing.Tools(), str(tmp_path / "games"))
+    reasons = sorted(s.reason for s in plan.steps)
+    assert reasons[1] == "same as another file here" and reasons[0] in (
+        "new (trimmed dump, padded back)", "new (overdump, padding cut off)"), reasons
+    moved, problems, log = apply_plan(plan, hashing.Tools(), tmp_path / "undo")
+    out = gba / "Trim Test (USA).gba"
+    assert not problems and out.read_bytes() == rom
+    assert (inbox / "trim test.gba").exists() and (inbox / "Trim Test (USA) [o].gba").exists()   # originals stay

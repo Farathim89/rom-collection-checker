@@ -15,6 +15,7 @@ from .collection import _TRACK, index, match_by_name, name_index, walk_files
 from .consoles import ARCHIVES, BY_KEY, CONSOLES, Console, consoles_for_ext
 from .dat import REGION_NAMES, DatStore, common_region, region_folder  # noqa: F401
 from .hashing import Tools, file_items
+from . import repair
 from .probe import QUICK_CONSOLES, identify, probe, serial_index
 
 NO_CHECKSUM = {"wbfs", "pbp", "cso", "chd", "cdi", "ciso", "nsp", "nsz", "xci", "xcz"}
@@ -151,6 +152,9 @@ class Step:
     unpack_all: bool = False    # a disc in an archive: everything in it goes into the target folder
     by_name: bool = False       # a disc recognised by its name only
     by_header: bool = False     # a disc named by its header (serial / game ID), not by a checksum
+    fix_size: int = 0           # a trimmed dump / an overdump: padded or cut to this size it is the listed dump
+    fix_pad: str = ""           # the padding byte added ("ff" / "00"), "" = its padding cut off
+    fix_crc: str = ""           # the listed dump's checksum (checked again after the fix)
 
     @property
     def label(self) -> str:
@@ -189,6 +193,7 @@ def make_plan(inbox: str, folders: dict[str, list[str]], have_crcs: dict[str, se
     disc_names: dict[str, dict[str, str]] = {}   # console -> Redump name index (for discs matched by name)
     serials: dict[str, dict] = {}                # console -> serial index (for discs named by their header)
     seen_games: dict[tuple[str, str], str] = {}  # (console, game) -> first inbox file with it
+    title_sizes: dict[str, dict[str, list[int]]] = {}   # console -> title -> the list's sizes (trimmed dumps)
     for n, p in enumerate(files, 1):
         if stop():
             break
@@ -250,7 +255,9 @@ def make_plan(inbox: str, folders: dict[str, list[str]], have_crcs: dict[str, se
                 continue
             c = BY_KEY[st.console]
             ext = Path(name).suffix.lower().lstrip(".")
-            if not st.game and not it.inner and c.key in QUICK_CONSOLES:
+            # a disc's header names it; a cartridge read whole whose checksum isn't listed is no known dump - its
+            # header can't tell (Frogger 2's prototype says it is Glover): it may be a trimmed dump, else unverified
+            if not st.game and not it.inner and c.key in QUICK_CONSOLES and (c.source != "no-intro" or not it.crcs):
                 if c.key not in serials:
                     serials[c.key] = serial_index(dats.entries(c.dat))
                 pr = probe(p, c.key, tools.dolphin)
@@ -263,6 +270,17 @@ def make_plan(inbox: str, folders: dict[str, list[str]], have_crcs: dict[str, se
                 g = match_by_name(Path(p.parent / name) if it.inner else p, disc_names[c.key])
                 if g:
                     st.game, st.by_name = g, True
+            if not st.game and c.source == "no-intro" and it.size and it.size <= repair.LIMIT:
+                # a trimmed dump (empty end cut off) or an overdump: padded / cut it may be a listed dump
+                if c.key not in title_sizes:
+                    title_sizes[c.key] = repair.title_sizes(dats.entries(c.dat))
+                sizes = repair.sizes_for(name, title_sizes[c.key])
+                data = repair.item_bytes(p, it.inner, tools) if any(x != it.size for x in sizes) else None
+                got = repair.find(data, name, sizes, ixs[c.key]) if data else None
+                if got:
+                    e, size, pad = got
+                    st.game, st.fix_size, st.fix_pad, st.fix_crc = e.game, size, pad.hex(), e.crc
+                    it.crcs.append(e.crc)
             if any(x in have_crcs.get(st.console, set()) for x in it.crcs) or                     (st.game and not st.by_name and st.game in (have_games or {}).get(st.console, ())):
                 st.reason = "you have it"      # by checksum, or the same game named by its header in your folder
                 continue
@@ -294,13 +312,15 @@ def make_plan(inbox: str, folders: dict[str, list[str]], have_crcs: dict[str, se
                     continue
             not_in = "new (not in Redump)" if c.source == "redump" else "new (not in No-Intro)"
             st.action, st.reason = "move", ("new (by name)" if st.by_name else "new (identified by header)"
-                                            if st.by_header else "new") if st.game else (
+                                            if st.by_header else ("new (trimmed dump, padded back)" if st.fix_pad
+                                                                  else "new (overdump, padding cut off)")
+                                            if st.fix_size else "new") if st.game else (
                 "translation" if TRANSLATION.search(name) else not_in)
             dest = console_dest(c, folders, games_root)
             if not st.game:      # a dump the list doesn't know: its own tab, not among the verified games
                 dest = dest / ("0 - Translations" if TRANSLATION.search(name) else
                                "0 - Hacks" if HACK.search(name) else "0 - Unverified")
-            if c.keep_archives and it.inner and len(items) == 1:   # one game per archive: it stays packed
+            if c.keep_archives and it.inner and len(items) == 1 and not st.fix_size:   # one game per archive: stays packed
                 st.unpack = False
             if it.inner and not st.unpack:          # the archive itself moves (DS .7z)
                 base, ext = p.stem, p.suffix
@@ -465,18 +485,36 @@ def apply_plan(plan: Plan, tools: Tools, undo_dir: Path, progress=lambda t: None
                     continue
                 shutil.copy2(got, t)
                 done.append({"op": "created", "path": str(t)})
+                if s.fix_size and not _fix(s, t, problems, done):
+                    continue
                 s.done = True
             else:
                 if not Path(s.source).exists():
                     continue   # an archive with several games already moved by an earlier step
-                shutil.move(s.source, t)
-                done.append({"op": "moved", "from": s.source, "to": str(t)})
+                if s.fix_size:                   # fixed: a copy; the original goes to _Duplicates with the tidy
+                    shutil.copy2(s.source, t)
+                    done.append({"op": "created", "path": str(t)})
+                    if not _fix(s, t, problems, done):
+                        continue
+                else:
+                    shutil.move(s.source, t)
+                    done.append({"op": "moved", "from": s.source, "to": str(t)})
                 s.done = True
             targets.add(str(t).lower())
         except OSError as e:
             problems.append(f"{s.label}: {e}")
     work.cleanup()
     return len(done), problems, write_undo(undo_dir, "sort", done)
+
+
+def _fix(s: Step, t: Path, problems: list[str], done: list[dict]) -> bool:
+    """Pads / cuts a just placed trimmed dump or overdump to the listed size; it stays only when it then matches."""
+    if repair.apply(t, s.fix_size, bytes.fromhex(s.fix_pad), {s.fix_crc}, t.name):
+        return True
+    t.unlink()                           # (a copy made a moment ago)
+    done.pop()
+    problems.append(f"could not fix, left in the inbox: {s.label}")
+    return False
 
 
 HAD = ("you have it", "same as another file here")
