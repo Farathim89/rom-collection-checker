@@ -6,7 +6,7 @@ set PY=.venv\Scripts\python.exe
 if not "%ROMCHECK_PY%"=="" set PY=%ROMCHECK_PY%
 "%PY%" -m pip install -q pyinstaller || goto :error
 "%PY%" -m PyInstaller --noconfirm --clean --onefile --windowed --name ROMCollectionChecker ^
-    --icon assets\icon.ico --add-data "assets\icon.png;assets" ^
+    --icon assets\icon.ico --add-data "assets\icon.png;assets" --add-data "assets\flags;assets\flags" --add-data "assets\consoles;assets\consoles" ^
     --exclude-module tkinter --exclude-module pytest ^
     --exclude-module PySide6.QtWebEngineCore --exclude-module PySide6.QtWebEngineWidgets --exclude-module PySide6.QtPdf ^
     checker.pyw || goto :error

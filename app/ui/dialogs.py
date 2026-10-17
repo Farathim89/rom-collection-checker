@@ -6,7 +6,8 @@ import re
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QColor, QIcon
+from PySide6 import QtSvg  # noqa: F401 - the flags are SVG (and PyInstaller bundles the plugin)
+from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QFrame,
                                QGridLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
                                QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QTabWidget, QTableWidget,
@@ -34,9 +35,37 @@ def folder_row(edit: QLineEdit, parent: QWidget) -> QWidget:
     return w
 
 
-def tick_groups(groups: list[tuple[str, list[tuple[str, str, bool]]]], columns: int = 3):
+# Settings → Regions: a flag before each country (flag-icons, MIT - assets/flags); groups like World have none
+FLAGS = {"USA": "us", "Canada": "ca", "Europe": "eu", "UK": "gb", "United Kingdom": "gb", "Germany": "de",
+         "Austria": "at", "Switzerland": "ch", "France": "fr", "Belgium": "be", "Netherlands": "nl", "Spain": "es",
+         "Portugal": "pt", "Italy": "it", "Greece": "gr", "Sweden": "se", "Denmark": "dk", "Norway": "no",
+         "Finland": "fi", "Poland": "pl", "Russia": "ru", "Australia": "au", "New Zealand": "nz", "Japan": "jp",
+         "Korea": "kr", "China": "cn", "Taiwan": "tw", "Hong Kong": "hk", "India": "in", "United Arab Emirates": "ae",
+         "Brazil": "br", "Argentina": "ar", "Peru": "pe", "Mexico": "mx", "Turkey": "tr"}
+
+
+def asset(*parts: str) -> Path:
+    import sys  # noqa: PLC0415
+    from ..portable import app_dir  # noqa: PLC0415
+    return Path(getattr(sys, "_MEIPASS", None) or app_dir(), "assets", *parts)
+
+
+def flag_icon(region: str) -> QIcon | None:
+    f = asset("flags", f"{FLAGS[region]}.svg") if region in FLAGS else None
+    return QIcon(str(f)) if f and f.is_file() else None
+
+
+def console_icon(key: str) -> QIcon | None:
+    """A console's logo (RetroArch's Systematic theme, CC BY 4.0 - assets/consoles/CREDITS.txt)."""
+    f = asset("consoles", f"{key}.png")
+    return QIcon(str(f)) if f.is_file() else None
+
+def tick_groups(groups: list[tuple[str, list[tuple]]], columns: int = 3, icon_size: QSize = QSize(20, 20)):
     """Bold group ticks, each with its items ticks in columns (filled top to bottom) - in a scroll area.
-    groups: (heading, [(label, key, ticked)]). Returns (widget, [(checkbox, key)])."""
+    groups: (heading, [(label, key, ticked[, icon])]). Returns (widget, [(checkbox, key)])."""
+    with_icons = any(len(it) > 3 for _h, items in groups for it in items)
+    blank = QPixmap(icon_size)
+    blank.fill(Qt.transparent)
     out: list[tuple[QCheckBox, str]] = []
     body = QWidget()
     grid = QGridLayout(body)                     # one grid for all groups: their columns line up
@@ -57,9 +86,12 @@ def tick_groups(groups: list[tuple[str, list[tuple[str, str, bool]]]], columns: 
         row += 1
         boxes = []
         rows = max(1, (len(items) + columns - 1) // columns)
-        for i, (label, key, on) in enumerate(items):
+        for i, (label, key, on, *icon) in enumerate(items):
             cb = QCheckBox(label)
             cb.setChecked(on)
+            if with_icons:                           # flags line up: a blank space where there is none
+                cb.setIcon(icon[0] if icon and icon[0] else QIcon(blank))
+                cb.setIconSize(icon_size)
             grid.addWidget(cb, row + i % rows, 1 + i // rows)
             boxes.append(cb)
             out.append((cb, key))
@@ -141,7 +173,8 @@ class SettingsDialog(QDialog):
         makers: dict[str, list] = {}
         for c in CONSOLES:
             on = (c.key in s.consoles) if s.consoles else (c.key in found)
-            makers.setdefault(c.maker, []).append((c.name if c.key in found else f"{c.name}   ·   no folder", c.key, on))
+            makers.setdefault(c.maker, []).append((c.name if c.key in found else f"{c.name}   ·   no folder", c.key, on,
+                                                   console_icon(c.key)))
         scroll, self.console_boxes = tick_groups(list(makers.items()))
         for cb, key in self.console_boxes:
             cb.setToolTip(self._folder_tip(key, found.get(key, [])))
@@ -256,9 +289,9 @@ class SettingsDialog(QDialog):
             if present:
                 groups.append((f"{group}   -   {sum(counts[r] for r in present):,} games",
                                [(f"{r}   -   {counts[r]:,} games" if r != "Other" else
-                                 f"Other / not named   -   {counts[r]:,} games", r, r not in s.hidden_regions)
+                                 f"Other / not named   -   {counts[r]:,} games", r, r not in s.hidden_regions, flag_icon(r))
                                 for r in present]))
-        scroll, self.region_boxes = tick_groups(groups)
+        scroll, self.region_boxes = tick_groups(groups, icon_size=QSize(20, 15))
         v.addWidget(scroll, 1)
         row = QHBoxLayout()
         for text, fn in (("Select all", lambda on: True), ("Select none", lambda on: False), ("Invert", lambda on: not on)):

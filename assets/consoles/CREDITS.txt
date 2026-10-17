@@ -1,0 +1,4 @@
+Console icons: the Systematic theme by baxysquare (https://github.com/baxysquare/baxy-retroarch-themes),
+from libretro's retroarch-assets (https://github.com/libretro/retroarch-assets), licensed under
+Creative Commons Attribution 4.0 International (https://creativecommons.org/licenses/by/4.0/).
+Changes: scaled down to 48 x 48 pixels.
