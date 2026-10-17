@@ -6,7 +6,6 @@ import re
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, Signal
-from PySide6 import QtSvg  # noqa: F401 - the flags are SVG (and PyInstaller bundles the plugin)
 from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QFrame,
                                QGridLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
@@ -21,6 +20,7 @@ from ..core.hashing import Tools
 from ..core.inbox import HAD, apply_plan, make_console_folders, make_plan, tidy_inbox, undo
 from ..core.rename import apply_renames, make_renames
 from . import theme
+from .icons import console_icon, flag_icon
 from .main_window import Item, open_folder_of, table
 
 
@@ -34,31 +34,6 @@ def folder_row(edit: QLineEdit, parent: QWidget) -> QWidget:
     h.addWidget(b)
     return w
 
-
-# Settings → Regions: a flag before each country (flag-icons, MIT - assets/flags); groups like World have none
-FLAGS = {"USA": "us", "Canada": "ca", "Europe": "eu", "UK": "gb", "United Kingdom": "gb", "Germany": "de",
-         "Austria": "at", "Switzerland": "ch", "France": "fr", "Belgium": "be", "Netherlands": "nl", "Spain": "es",
-         "Portugal": "pt", "Italy": "it", "Greece": "gr", "Sweden": "se", "Denmark": "dk", "Norway": "no",
-         "Finland": "fi", "Poland": "pl", "Russia": "ru", "Australia": "au", "New Zealand": "nz", "Japan": "jp",
-         "Korea": "kr", "China": "cn", "Taiwan": "tw", "Hong Kong": "hk", "India": "in", "United Arab Emirates": "ae",
-         "Brazil": "br", "Argentina": "ar", "Peru": "pe", "Mexico": "mx", "Turkey": "tr"}
-
-
-def asset(*parts: str) -> Path:
-    import sys  # noqa: PLC0415
-    from ..portable import app_dir  # noqa: PLC0415
-    return Path(getattr(sys, "_MEIPASS", None) or app_dir(), "assets", *parts)
-
-
-def flag_icon(region: str) -> QIcon | None:
-    f = asset("flags", f"{FLAGS[region]}.svg") if region in FLAGS else None
-    return QIcon(str(f)) if f and f.is_file() else None
-
-
-def console_icon(key: str) -> QIcon | None:
-    """A console's logo (RetroArch's Systematic theme, CC BY 4.0 - assets/consoles/CREDITS.txt)."""
-    f = asset("consoles", f"{key}.png")
-    return QIcon(str(f)) if f.is_file() else None
 
 def tick_groups(groups: list[tuple[str, list[tuple]]], columns: int = 3, icon_size: QSize = QSize(20, 20)):
     """Bold group ticks, each with its items ticks in columns (filled top to bottom) - in a scroll area.

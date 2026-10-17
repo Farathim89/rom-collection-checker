@@ -6,7 +6,7 @@ import re
 import urllib.parse
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, QTimer, QUrl, Signal
+from PySide6.QtCore import QObject, QRunnable, QSize, Qt, QThreadPool, QTimer, QUrl, Signal
 from PySide6.QtGui import QAction, QColor, QDesktopServices, QGuiApplication, QPixmap
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QFileDialog, QFrame, QHBoxLayout, QHeaderView,
@@ -23,6 +23,7 @@ from ..core.extra import ExtraStore
 from ..core.hashing import Tools
 from ..portable import ui_settings
 from . import theme
+from .icons import console_icon
 
 KIND_SETS = {"Official games": {"game"},
              "+ unlicensed": {"game", "unlicensed"},
@@ -228,6 +229,7 @@ class MainWindow(QMainWindow):
         v = QVBoxLayout(body)
         v.setContentsMargins(10, 10, 10, 10)
         self.menu = QListWidget()
+        self.menu.setIconSize(QSize(18, 18))
         self.menu.setObjectName("sidemenu")
         self.menu.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.menu.setTextElideMode(Qt.ElideMiddle)
@@ -457,7 +459,7 @@ class MainWindow(QMainWindow):
                 head = QListWidgetItem(maker.upper())
                 head.setFlags(Qt.NoItemFlags)
                 self.menu.addItem(head)
-            text = f"   {c.name}"
+            text = f" {c.name}"
             if r:
                 total, have = r.counts(self.kinds(), self.scope())
                 tot_all += total
@@ -466,6 +468,8 @@ class MainWindow(QMainWindow):
             it = QListWidgetItem(text)
             it.setData(Qt.UserRole, c.key)
             it.setToolTip("; ".join(found[c.key]))
+            if (icon := console_icon(c.key)) is not None:
+                it.setIcon(icon)
             self.menu.addItem(it)
         for i in range(self.menu.count()):
             if self.menu.item(i).data(Qt.UserRole) == keep:
