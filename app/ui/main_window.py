@@ -346,6 +346,9 @@ class MainWindow(QMainWindow):
         v = QVBoxLayout(w)
         v.setContentsMargins(0, 0, 0, 0)
         head = QHBoxLayout()
+        self.console_logo = QLabel()                 # the console's logo before its name
+        self.console_logo.setFixedSize(44, 44)
+        head.addWidget(self.console_logo)
         self.console_title = QLabel()
         self.console_title.setObjectName("pagetitle")
         head.addWidget(self.console_title, 1)
@@ -545,6 +548,8 @@ class MainWindow(QMainWindow):
         c = BY_KEY.get(key)
         if not c:
             return
+        icon = console_icon(c.key)
+        self.console_logo.setPixmap(icon.pixmap(40, 40) if icon else QPixmap())
         t = self.games
         t.setSortingEnabled(False)
         t.setRowCount(0)
