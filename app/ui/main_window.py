@@ -941,22 +941,55 @@ class MainWindow(QMainWindow):
             if not ask:
                 self.install_update(rel)
                 return
-            notes = re.sub(r"🤖.*", "", rel.notes).strip()
-            box = QMessageBox(self)
-            box.setWindowTitle("Update available")
-            box.setTextFormat(Qt.MarkdownText)
-            box.setText(f"**ROM Collection Checker {rel.version}** is out (you have {__version__}).\n\n"
-                        + (notes[:1500] + ("…" if len(notes) > 1500 else "")) +
-                        "\n\nUpdate now? It downloads the new exe, closes the checker, swaps it and starts again. "
-                        "Your settings and lists stay.")
-            box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
-            if box.exec() == QMessageBox.Yes:
+            if self.update_window(rel):
                 self.install_update(rel)
 
         w.signals.done.connect(done)
         w.signals.failed.connect(lambda err: manual and QMessageBox.warning(self, "Updates", f"Couldn't check: {err}"))
         self._update_worker = w
         QThreadPool.globalInstance().start(w)
+
+    def update_window(self, rel) -> bool:
+        """A new version: what's new (the release notes' headlines), Update now / Later, and the start-up tick."""
+        from PySide6.QtWidgets import QCheckBox, QDialog, QHBoxLayout  # noqa: PLC0415
+        heads = [h.rstrip(" .:") for h in re.findall(r"^\s*-\s+\*\*(.+?)\*\*", rel.notes, re.M)][:5]
+        d = QDialog(self)
+        d.setWindowTitle("Update")
+        d.setMinimumWidth(520)
+        v = QVBoxLayout(d)
+        title = QLabel(f"ROM Collection Checker {rel.version} is out")
+        title.setObjectName("pagetitle")
+        v.addWidget(title)
+        have = QLabel(f"You have {__version__}.")
+        have.setObjectName("muted")
+        v.addWidget(have)
+        if heads:
+            news = QLabel("<b>What's new</b><br>" + "<br>".join(f"•&nbsp; {h}" for h in heads))
+            news.setWordWrap(True)
+            v.addWidget(news)
+        how = QLabel("Update now downloads the new exe, closes the checker, swaps it and starts again. "
+                     "Your settings, lists and undo logs stay.")
+        how.setWordWrap(True)
+        how.setObjectName("muted")
+        v.addWidget(how)
+        tick = QCheckBox("Look for updates at every start")
+        tick.setChecked(self.s.check_updates)
+        v.addWidget(tick)
+        row = QHBoxLayout()
+        row.addStretch()
+        now, later = QPushButton("Update now"), QPushButton("Later")
+        now.setObjectName("primary")
+        now.clicked.connect(d.accept)
+        later.clicked.connect(d.reject)
+        row.addWidget(now)
+        row.addWidget(later)
+        v.addLayout(row)
+        now.setDefault(True)
+        ok = d.exec() == QDialog.Accepted
+        if tick.isChecked() != self.s.check_updates:
+            self.s.check_updates = tick.isChecked()
+            save_settings(self.s)
+        return ok
 
     def install_update(self, rel) -> None:
         import sys  # noqa: PLC0415
