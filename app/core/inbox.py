@@ -13,7 +13,7 @@ from pathlib import Path
 
 from .collection import _TRACK, index, match_by_name, name_index, walk_files
 from .consoles import ARCHIVES, BY_KEY, CONSOLES, Console, consoles_for_ext
-from .dat import REGION_OF, DatStore, regions_of
+from .dat import REGION_NAMES, DatStore, common_region, region_folder  # noqa: F401
 from .hashing import Tools, file_items
 from .probe import QUICK_CONSOLES, identify, probe, serial_index
 
@@ -102,18 +102,7 @@ def make_console_folders(inbox: str, folders: dict[str, list[str]], games_root: 
     return made
 
 
-REGION_NAMES = set(REGION_OF) | {"World"}
 REGION_FOLDERS = [False]          # make_plan(region_folders=...): sorted games go into <console>\<region>\
-
-
-def region_folder(game: str) -> str:
-    """The region folder of a No-Intro / Redump name: its region (Japan, Germany …), or its first one when all its
-    regions are of one group ("Europe, Australia" -> Europe); World when they span groups ("USA, Europe") or the
-    name says World; "" when the name has no region."""
-    rs = [r for r in regions_of(game) if r in REGION_NAMES]
-    if not rs:
-        return ""
-    return rs[0] if len({REGION_OF.get(r, r) for r in rs}) == 1 else "World"
 
 def _game_dirs(dest: Path) -> list[Path]:
     """The folders under a console folder that could be one game's own folder (also inside region folders)."""
@@ -638,8 +627,9 @@ def region_moves(res, root: Path) -> list[tuple[Path, Path]]:
     units: dict[Path, str] = {}
     for t in res.titles.values():
         for game, labels in t.have.items():
-            reg = region_folder(game)
             for label in labels:
+                pg = res.identified.get(label)          # named by its header: World when it fits several regions
+                reg = pg[2] if pg and len(pg) > 2 and pg[2] else region_folder(game)
                 p = Path(label.split(" › ")[0])
                 try:
                     parts = p.relative_to(root).parts

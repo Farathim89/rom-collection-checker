@@ -208,9 +208,8 @@ def _xbox(p: Path) -> Probe | None:
             c = f.read(0x1D0)
             tid, = struct.unpack_from("<I", c, 0x8)
             pub = bytes([(tid >> 24) & 0xFF, (tid >> 16) & 0xFF]).decode("latin1")
-            ver, = struct.unpack_from("<I", c, 0xAC)
             if re.fullmatch(r"[A-Z0-9]{2}", pub):
-                return Probe(f"{pub}{tid & 0xFFFF:03d}", version=ver)
+                return Probe(f"{pub}{tid & 0xFFFF:03d}")   # its version isn't Redump's revision
     return None
 
 
@@ -245,11 +244,11 @@ def _xbox360(p: Path) -> Probe | None:
         for k in range(min(count, 64)):
             key, val = struct.unpack_from(">II", x, 0x18 + k * 8)
             if key == 0x00040006 and val + 24 <= len(x):      # execution info
-                _media, version, _base, tid = struct.unpack_from(">IIII", x, val)
+                _media, _version, _base, tid = struct.unpack_from(">IIII", x, val)
                 disc = x[val + 18]
                 pub = bytes([(tid >> 24) & 0xFF, (tid >> 16) & 0xFF]).decode("latin1")
                 if re.fullmatch(r"[A-Z0-9]{2}", pub):
-                    return Probe(f"{pub}{tid & 0xFFFF:03d}", version=version, disc=max(0, disc - 1))
+                    return Probe(f"{pub}{tid & 0xFFFF:03d}", disc=max(0, disc - 1))   # (not Redump's revision)
     return None
 
 
@@ -323,8 +322,14 @@ def serial_index(entries) -> dict[str, list[str]]:
 
 
 def identify(pr: Probe, index: dict, p: Path | None = None, size: int = 0) -> tuple[str, bool]:
-    """(game, sure): the game this header belongs to; sure = only one fits. Several versions with one serial
-    (PlayStation discs have no revision in their header) are told apart by file size and file name."""
+    """(game, sure): the game this header belongs to; sure = only one fits."""
+    games = candidates(pr, index, p, size)
+    return (games[0], len(games) == 1) if games else ("", False)
+
+
+def candidates(pr: Probe, index: dict, p: Path | None = None, size: int = 0) -> list[str]:
+    """The versions this header can be, best first. Several versions with one serial (PlayStation discs have no
+    revision in their header) are told apart by file size and file name."""
     games = list(index.get(pr.serial, []))
     # later versions get a digit or a region on the serial in Redump (SLES-52541 v1.03, SLES-525413 v2.01,
     # SLES-52541-ANZ): the whole family, then size and name decide
@@ -343,21 +348,19 @@ def identify(pr: Probe, index: dict, p: Path | None = None, size: int = 0) -> tu
     digits = re.sub(r"^[A-Z]+", "", pr.serial)      # Saturn: "MK-81079" is "81079" (USA) or "MK81079-50" (Europe)
     if digits != pr.serial and len(digits) >= 4:
         games += [g for g in index.get(digits, []) if g not in games]
-    if not games:
-        return "", False
-    if len(games) == 1:
-        return games[0], True
+    if len(games) <= 1:
+        return games
     sizes = index.get("", {})
     if size:
         by_size = [g for g in games if size in sizes.get(g, ())]
         if len(by_size) == 1:
-            return by_size[0], True
+            return by_size
         games = by_size or games
     if p is not None:
         stem = re.sub(r"\s*\(Track \d+\)", "", p.stem).lower()
         by_name = [g for g in games if g.lower() == stem or g.lower() == p.parent.name.lower()]
         if len(by_name) == 1:
-            return by_name[0], True
+            return by_name
         dn = re.search(r"\(Disc (\d+)\)", p.stem)
         if dn:
             games = [g for g in games if f"(Disc {dn.group(1)})" in g] or games
@@ -378,4 +381,11 @@ def identify(pr: Probe, index: dict, p: Path | None = None, size: int = 0) -> tu
         r = [g for g in pick if "(Rev " not in g]
         pick = r or pick
     plain = [g for g in pick if not re.search(r"\((Beta|Proto|Demo|Sample|Kiosk)", g)] or pick
-    return plain[0], len(plain) == 1
+    if p is not None:                             # best first: the same title as the file ("Halo (Japan)" last)
+        want = _plain_title(p.stem)
+        plain.sort(key=lambda g: _plain_title(g) != want)
+    return plain
+
+
+def _plain_title(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", re.sub(r"\s*[\(\[].*", "", name).lower())

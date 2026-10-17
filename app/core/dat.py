@@ -183,3 +183,28 @@ class DatStore:
             except OSError:
                 self._cache[dat] = []
         return self._cache[dat]
+
+
+# region folders (Sort inbox / Region folders…): <console>/<country>/, World when a game spans groups
+REGION_NAMES = set(REGION_OF) | {"World"}
+
+
+def region_folder(game: str) -> str:
+    """The region folder of a No-Intro / Redump name: its region (Japan, Germany …), or its first one when all its
+    regions are of one group ("Europe, Australia" -> Europe); World when they span groups ("USA, Europe") or the
+    name says World; "" when the name has no region."""
+    rs = [r for r in regions_of(game) if r in REGION_NAMES]
+    if not rs:
+        return ""
+    return rs[0] if len({REGION_OF.get(r, r) for r in rs}) == 1 else "World"
+
+
+def common_region(games: list[str]) -> str:
+    """The region folder of a game that could be any of these versions (one serial, several releases): theirs
+    when they agree, the first one's when all are of one group, else World."""
+    regs = [region_folder(g) for g in games if region_folder(g)]
+    if not regs:
+        return ""
+    if len(set(regs)) == 1:
+        return regs[0]
+    return regs[0] if len({REGION_OF.get(r, r) for r in regs}) == 1 else "World"

@@ -61,15 +61,16 @@ class ScanCache:
             return [Item(str(p), i[0], i[1], i[2]) for i in e["i"]], e.get("e", "")
         return None
 
-    def get_probe(self, p: Path, st: os.stat_result) -> tuple[str, bool] | None:
-        """A header check done before: (game or "", sure)."""
+    def get_probe(self, p: Path, st: os.stat_result) -> tuple[str, bool, str] | None:
+        """A header check done before: (game or "", sure, its region folder - World when it could be versions of
+        several regions)."""
         e = self.data.get("probe:" + str(p))
-        if e and e["s"] == st.st_size and e["m"] == int(st.st_mtime):
-            return e["g"], e["sure"]
+        if e and e["s"] == st.st_size and e["m"] == int(st.st_mtime) and "r" in e:
+            return e["g"], e["sure"], e["r"]
         return None
 
-    def put_probe(self, p: Path, st: os.stat_result, game: str, sure: bool) -> None:
-        self.data["probe:" + str(p)] = {"s": st.st_size, "m": int(st.st_mtime), "g": game, "sure": sure}
+    def put_probe(self, p: Path, st: os.stat_result, game: str, sure: bool, region: str = "") -> None:
+        self.data["probe:" + str(p)] = {"s": st.st_size, "m": int(st.st_mtime), "g": game, "sure": sure, "r": region}
         self.dirty = True
 
     def put(self, p: Path, st: os.stat_result, items: list[Item], err: str) -> None:
@@ -161,9 +162,23 @@ def scan_console(c: Console, folders: list[str], dats: DatStore, tools: Tools, c
     """extra: an ExtraStore - files No-Intro doesn't list are looked up in TOSEC / hacks / homebrew too.
     quick: discs, DS and N64 games are named by their header (a few KB) instead of a checksum of the whole file;
     files that already have a checksum count as verified."""
-    from .probe import QUICK_CONSOLES, identify, probe, serial_index  # noqa: PLC0415
+    from .dat import common_region  # noqa: PLC0415
+    from .probe import QUICK_CONSOLES, candidates, probe, serial_index  # noqa: PLC0415
     quick = quick and c.key in QUICK_CONSOLES
-    sidx = serial_index(entries_for_quick(dats, c)) if quick else {}
+    sidx: dict = {}
+
+    def header(p: Path, st) -> tuple[str, bool, str]:
+        """(game, sure, region folder) from the file's header (cached)."""
+        pg = cache.get_probe(p, st)
+        if pg is None:
+            if not sidx:
+                sidx.update(serial_index(entries_for_quick(dats, c)))
+            pr = probe(p, c.key, tools.dolphin)
+            games = candidates(pr, sidx, p, p.stat().st_size) if pr else []
+            pg = (games[0], len(games) == 1, common_region(games)) if games else ("", False, "")
+            cache.put_probe(p, st, *pg)
+        return pg
+
     discs: dict[tuple[str, str], str] = {}        # (folder, disc name) -> game, for a disc's other tracks
     res = ConsoleResult(c, folders, dats.version(c.dat))
     known_ix = extra.index(c.dat) if extra is not None else {}
@@ -206,11 +221,7 @@ def scan_console(c: Console, folders: list[str], dats: DatStore, tools: Tools, c
             if _TRACK.search(p.stem) and base in discs:     # another track of a disc named by its header
                 res.titles[names_or_entry(entries, discs[base]).title].have.setdefault(discs[base], []).append(label)
                 continue
-            pg = cache.get_probe(p, st)
-            if pg is None:
-                pr = probe(p, c.key, tools.dolphin)
-                pg = identify(pr, sidx, p, st.st_size) if pr else ("", False)
-                cache.put_probe(p, st, *pg)
+            pg = header(p, st)
             if pg[0]:
                 res.identified[label] = pg
                 discs[base] = pg[0]
@@ -240,7 +251,12 @@ def scan_console(c: Console, folders: list[str], dats: DatStore, tools: Tools, c
                     found = [e1]
             res.crcs.update(it.crcs)
             if not found and names and (not it.crcs or p.suffix.lower().lstrip(".") in c.name_fallback):
-                # a disc format that can't be checked (or a trimmed .wbfs): by its name
+                # a disc format that can't be checked (or a trimmed .wbfs): by its header, else by its name
+                pg = header(p, st) if c.key in QUICK_CONSOLES and not it.inner else ("", False, "")
+                if pg[0]:
+                    res.identified[it.label] = pg
+                    res.titles[names_or_entry(entries, pg[0]).title].have.setdefault(pg[0], []).append(it.label)
+                    continue
                 g = match_by_name(p, names)
                 if g:
                     res.by_name[it.label] = g

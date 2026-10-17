@@ -351,7 +351,7 @@ def test_quick_header_check_names_a_disc_without_reading_it(tmp_path):
     (games / "my cube game.iso").write_bytes(head + bytes(4096 - len(head)))
     store = dat.DatStore(d)
     r = scan_console(BY_KEY["gc"], [str(games)], store, hashing.Tools(), ScanCache(tmp_path / "c.json"), [], quick=True)
-    assert list(r.identified.values()) == [("Cube Game (USA) (Rev 1)", True)]
+    assert list(r.identified.values()) == [("Cube Game (USA) (Rev 1)", True, "USA")]
     assert r.counts({"game"}, "All") == (1, 1)
     idx = serial_index(store.entries("Nintendo - GameCube"))
     assert identify(Probe("GCGE", version=0), idx)[0] == "Cube Game (USA)"
@@ -432,7 +432,7 @@ def test_xbox360_title_id_from_default_xex(tmp_path):
     p = tmp_path / "forza.iso"
     p.write_bytes(bytes(img))
     pr = probe(p, "x360")
-    assert (pr.serial, pr.version, pr.disc) == ("MS2505", 7, 1)
+    assert (pr.serial, pr.version, pr.disc) == ("MS2505", -1, 1)     # its version is not Redump's revision
     p.write_bytes(bytes(48 * 2048))                                # not an Xbox disc
     assert probe(p, "x360") is None
 
@@ -480,3 +480,11 @@ def test_region_folders(tmp_path):
     (wii / "Japan" / "A Game" / "A Game.wbfs").write_bytes(b"")
     name = "Zelda (Europe).wbfs"
     assert place(wii, name, region="Europe") == str(wii / "Europe" / "Zelda (Europe)" / name)
+
+
+def test_one_serial_for_several_regions_goes_to_world():
+    from app.core.dat import common_region
+    assert common_region(["Halo - Combat Evolved (USA)", "Halo - Combat Evolved (Europe)", "Halo (Japan)"]) == "World"
+    assert common_region(["Mortal Kombat - Shaolin Monks (USA, Europe)", "Mortal Kombat - Shaolin Monks (Germany)"]) == "World"
+    assert common_region(["Game (Europe)", "Game (Europe) (Rev 1)"]) == "Europe"
+    assert common_region(["Game (Germany)", "Game (Austria)"]) == "Germany"
