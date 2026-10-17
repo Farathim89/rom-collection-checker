@@ -340,6 +340,7 @@ QCheckBox {{ spacing: 6px; }}
 QCheckBox::indicator {{ border: 1px solid {p.muted}; background: {p.field}; border-radius: 3px; }}
 QCheckBox::indicator:hover {{ border-color: {p.accent}; }}
 QCheckBox::indicator:checked {{ background: {p.accent}; border-color: {p.accent}; }}
+QCheckBox::indicator:indeterminate {{ border-color: {p.accent}; background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {p.field}, stop:0.32 {p.field}, stop:0.33 {p.accent}, stop:0.67 {p.accent}, stop:0.68 {p.field}, stop:1 {p.field}); }}
 QCheckBox::indicator:disabled {{ border-color: {p.border}; }}
 QScrollBar:vertical {{ background: {p.panel}; width: 10px; }}
 QScrollBar:horizontal {{ background: {p.panel}; height: 10px; }}

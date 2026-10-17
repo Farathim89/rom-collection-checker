@@ -34,6 +34,62 @@ def folder_row(edit: QLineEdit, parent: QWidget) -> QWidget:
     return w
 
 
+def tick_groups(groups: list[tuple[str, list[tuple[str, str, bool]]]], columns: int = 3):
+    """Bold group ticks, each with its items ticks in columns (filled top to bottom) - in a scroll area.
+    groups: (heading, [(label, key, ticked)]). Returns (widget, [(checkbox, key)])."""
+    out: list[tuple[QCheckBox, str]] = []
+    body = QWidget()
+    grid = QGridLayout(body)                     # one grid for all groups: their columns line up
+    grid.setHorizontalSpacing(24)
+    grid.setVerticalSpacing(4)
+    grid.setColumnMinimumWidth(0, 2)
+    for c in range(1, columns + 1):
+        grid.setColumnStretch(c, 1)
+    row = 0
+    for heading, items in groups:
+        head = QCheckBox(heading)
+        head.setTristate(True)
+        f = head.font()
+        f.setBold(True)
+        head.setFont(f)
+        grid.setRowMinimumHeight(row, 30)
+        grid.addWidget(head, row, 0, 1, columns + 1, Qt.AlignBottom)
+        row += 1
+        boxes = []
+        rows = max(1, (len(items) + columns - 1) // columns)
+        for i, (label, key, on) in enumerate(items):
+            cb = QCheckBox(label)
+            cb.setChecked(on)
+            grid.addWidget(cb, row + i % rows, 1 + i // rows)
+            boxes.append(cb)
+            out.append((cb, key))
+        row += rows
+
+        def sync(_=None, head=head, boxes=boxes) -> None:
+            on = sum(b.isChecked() for b in boxes)
+            head.blockSignals(True)
+            head.setCheckState(Qt.Checked if on == len(boxes) else Qt.Unchecked if not on else Qt.PartiallyChecked)
+            head.blockSignals(False)
+
+        def set_all(state, boxes=boxes, sync=sync) -> None:
+            for b in boxes:                          # unticked -> all off; partly or fully ticked -> all on
+                b.blockSignals(True)
+                b.setChecked(state != 0)
+                b.blockSignals(False)
+            sync()
+
+        head.stateChanged.connect(set_all)
+        for cb in boxes:
+            cb.toggled.connect(sync)
+        sync()
+    grid.setRowStretch(row, 1)
+    scroll = QScrollArea()
+    scroll.setWidgetResizable(True)
+    scroll.setFrameShape(QFrame.NoFrame)
+    scroll.setWidget(body)
+    return scroll, out
+
+
 class ThemePicker(QWidget):
     picked = Signal(str)
 
@@ -82,17 +138,18 @@ class SettingsDialog(QDialog):
         self.skip = QLineEdit(", ".join(s.skip_folders))
         form.addRow("Skip folders", self.skip)
         found = find_folders(s.games_root, s.folders)
-        self.list = QListWidget()
+        makers: dict[str, list] = {}
         for c in CONSOLES:
-            it = QListWidgetItem(f"{c.name}   →   {'; '.join(found.get(c.key, [])) or 'no folder found'}")
-            it.setData(Qt.UserRole, c.key)
-            it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
             on = (c.key in s.consoles) if s.consoles else (c.key in found)
-            it.setCheckState(Qt.Checked if on else Qt.Unchecked)
-            self.list.addItem(it)
-        self.list.itemDoubleClicked.connect(self._pick_folder)
-        form.addRow("Consoles", self.list)
-        form.addRow("", QLabel("Tick the consoles to check. Double-click one to choose its folder yourself."))
+            makers.setdefault(c.maker, []).append((c.name if c.key in found else f"{c.name}   ·   no folder", c.key, on))
+        scroll, self.console_boxes = tick_groups(list(makers.items()))
+        for cb, key in self.console_boxes:
+            cb.setToolTip(self._folder_tip(key, found.get(key, [])))
+            cb.setContextMenuPolicy(Qt.CustomContextMenu)
+            cb.customContextMenuRequested.connect(lambda _pos, cb=cb, key=key: self._pick_folder(cb, key))
+        scroll.setMinimumHeight(260)
+        form.addRow("Consoles", scroll)
+        form.addRow("", QLabel("Tick the consoles to check. Right-click one to choose its folder yourself."))
 
         page = QWidget()
         form = QFormLayout(page)
@@ -166,13 +223,17 @@ class SettingsDialog(QDialog):
         buttons.rejected.connect(self.reject)
         outer.addWidget(buttons)
 
-    def _pick_folder(self, it: QListWidgetItem) -> None:
-        key = it.data(Qt.UserRole)
+    @staticmethod
+    def _folder_tip(key: str, folders: list[str]) -> str:
+        return ("\n".join(folders) if folders else "No folder found") + "\nRight-click to choose its folder."
+
+    def _pick_folder(self, cb: QCheckBox, key: str) -> None:
         d = QFileDialog.getExistingDirectory(self, f"Folder for {BY_KEY[key].name}", self.root.text())
         if d:
             self.s.folders[key] = [d]
-            it.setText(f"{BY_KEY[key].name}   →   {d}")
-            it.setCheckState(Qt.Checked)
+            cb.setText(BY_KEY[key].name)
+            cb.setToolTip(self._folder_tip(key, [d]))
+            cb.setChecked(True)
 
     def _regions_tab(self, s: Settings, dats: DatStore) -> QWidget:
         """World / USA / Europe / Asia / Other, each with the real region names of your lists under it: untick a
@@ -189,59 +250,15 @@ class SettingsDialog(QDialog):
         note.setObjectName("muted")
         v.addWidget(note)
         counts = region_counts(dats.entries(c.dat) for c in CONSOLES if dats.have(c.dat))
-        self.region_boxes: list[tuple[QCheckBox, str]] = []
-        body = QWidget()
-        col = QVBoxLayout(body)
-        col.setSpacing(4)
+        groups = []
         for group, raws in REGION_TREE:
             present = sorted((r for r in raws if counts.get(r)), key=lambda x: -counts[x])
-            if not present:
-                continue
-            head = QCheckBox(f"{group}   -   {sum(counts[r] for r in present):,} games")
-            head.setTristate(True)
-            f = head.font()
-            f.setBold(True)
-            head.setFont(f)
-            col.addSpacing(6)
-            col.addWidget(head)
-            grid = QGridLayout()
-            grid.setContentsMargins(26, 0, 0, 0)
-            grid.setHorizontalSpacing(24)
-            boxes = []
-            rows = (len(present) + 2) // 3                     # 3 columns, filled top to bottom
-            for i, r in enumerate(present):
-                cb = QCheckBox(f"{r}   -   {counts[r]:,} games" if r != "Other" else f"Other / not named   -   {counts[r]:,} games")
-                cb.setChecked(r not in s.hidden_regions)
-                grid.addWidget(cb, i % rows, i // rows)
-                boxes.append(cb)
-                self.region_boxes.append((cb, r))
-            for c in range(3):
-                grid.setColumnStretch(c, 1)
-            col.addLayout(grid)
-
-            def sync(_=None, head=head, boxes=boxes) -> None:
-                on = sum(b.isChecked() for b in boxes)
-                head.blockSignals(True)
-                head.setCheckState(Qt.Checked if on == len(boxes) else Qt.Unchecked if not on else Qt.PartiallyChecked)
-                head.blockSignals(False)
-
-            def set_all(state, boxes=boxes, sync=sync) -> None:
-                want = state != 0                    # unticked -> all off; partly or fully ticked -> all on
-                for b in boxes:
-                    b.blockSignals(True)
-                    b.setChecked(want)
-                    b.blockSignals(False)
-                sync()
-
-            head.stateChanged.connect(set_all)
-            for cb in boxes:
-                cb.toggled.connect(sync)
-            sync()
-        col.addStretch()
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setWidget(body)
+            if present:
+                groups.append((f"{group}   -   {sum(counts[r] for r in present):,} games",
+                               [(f"{r}   -   {counts[r]:,} games" if r != "Other" else
+                                 f"Other / not named   -   {counts[r]:,} games", r, r not in s.hidden_regions)
+                                for r in present]))
+        scroll, self.region_boxes = tick_groups(groups)
         v.addWidget(scroll, 1)
         row = QHBoxLayout()
         for text, fn in (("Select all", lambda on: True), ("Select none", lambda on: False), ("Invert", lambda on: not on)):
@@ -290,8 +307,7 @@ class SettingsDialog(QDialog):
         s.games_root = self.root.text().strip()
         s.inbox = self.inbox.text().strip()
         s.skip_folders = [x.strip() for x in self.skip.text().split(",") if x.strip()]
-        ticked = [self.list.item(i).data(Qt.UserRole) for i in range(self.list.count())
-                  if self.list.item(i).checkState() == Qt.Checked]
+        ticked = [key for cb, key in self.console_boxes if cb.isChecked()]
         found = find_folders(s.games_root, s.folders)
         s.consoles = [] if set(ticked) == set(found) else ticked
         s.unpack, s.official_names = self.unpack.isChecked(), self.names.isChecked()
