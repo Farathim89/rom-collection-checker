@@ -6,7 +6,7 @@ import re
 import urllib.parse
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QRunnable, QSize, Qt, QThreadPool, QTimer, QUrl, Signal
+from PySide6.QtCore import QEvent, QObject, QRunnable, QSize, Qt, QThreadPool, QTimer, QUrl, Signal
 from PySide6.QtGui import QAction, QColor, QDesktopServices, QGuiApplication, QPixmap
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QFileDialog, QFrame, QHBoxLayout, QHeaderView,
@@ -234,6 +234,8 @@ class MainWindow(QMainWindow):
         self.menu.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.menu.setTextElideMode(Qt.ElideMiddle)
         self.menu.currentItemChanged.connect(lambda *_: self.show_page())
+        self.collapsed = set(str(ui_settings().value("collapsed", "") or "").split("|")) - {""}   # folded makers
+        self.menu.viewport().installEventFilter(self)    # a click on a maker heading folds it
         v.addWidget(self.menu, 1)
         for text, fn, primary, tip in (
                 ("🔄  Scan collection", self.scan, True, "Read your console folders (only new or changed files)"),
@@ -437,6 +439,29 @@ class MainWindow(QMainWindow):
             f = {k: v for k, v in f.items() if k in self.s.consoles}
         return f
 
+    def fold_makers(self) -> None:
+        """Maker headings: ▾ open, ▸ folded (with how many consoles are under it); folded consoles are hidden."""
+        for i in range(self.menu.count()):
+            it = self.menu.item(i)
+            key = str(it.data(Qt.UserRole) or "")
+            if key.startswith("maker:"):
+                maker = key[6:]
+                n = sum(1 for j in range(self.menu.count()) if self.menu.item(j).data(Qt.UserRole + 1) == maker)
+                it.setText(f"▸  {maker.upper()}   ·  {n}" if maker in self.collapsed else f"▾  {maker.upper()}")
+            elif it.data(Qt.UserRole + 1):
+                it.setHidden(it.data(Qt.UserRole + 1) in self.collapsed)
+
+    def eventFilter(self, obj, ev) -> bool:
+        if obj is self.menu.viewport() and ev.type() == QEvent.MouseButtonPress:
+            it = self.menu.itemAt(ev.position().toPoint())
+            key = str(it.data(Qt.UserRole) or "") if it else ""
+            if key.startswith("maker:"):
+                self.collapsed ^= {key[6:]}
+                ui_settings().setValue("collapsed", "|".join(sorted(self.collapsed)))
+                self.fold_makers()
+                return True
+        return super().eventFilter(obj, ev)
+
     def fill_menu(self) -> None:
         keep = self.menu.currentItem().data(Qt.UserRole) if self.menu.currentItem() else "overview"
         self.menu.blockSignals(True)
@@ -461,8 +486,10 @@ class MainWindow(QMainWindow):
                 continue
             if c.maker != maker:
                 maker = c.maker
-                head = QListWidgetItem(maker.upper())
+                head = QListWidgetItem()
                 head.setFlags(Qt.NoItemFlags)
+                head.setData(Qt.UserRole, f"maker:{maker}")
+                head.setToolTip("Click to fold / unfold")
                 self.menu.addItem(head)
             text = f" {c.name}"
             if r:
@@ -472,10 +499,12 @@ class MainWindow(QMainWindow):
                 text += f"   {have}/{total}"
             it = QListWidgetItem(text)
             it.setData(Qt.UserRole, c.key)
+            it.setData(Qt.UserRole + 1, c.maker)
             it.setToolTip("; ".join(found[c.key]))
             if (icon := console_icon(c.key)) is not None:
                 it.setIcon(icon)
             self.menu.addItem(it)
+        self.fold_makers()
         for i in range(self.menu.count()):
             if self.menu.item(i).data(Qt.UserRole) == keep:
                 self.menu.setCurrentRow(i)
