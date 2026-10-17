@@ -488,3 +488,24 @@ def test_one_serial_for_several_regions_goes_to_world():
     assert common_region(["Mortal Kombat - Shaolin Monks (USA, Europe)", "Mortal Kombat - Shaolin Monks (Germany)"]) == "World"
     assert common_region(["Game (Europe)", "Game (Europe) (Rev 1)"]) == "Europe"
     assert common_region(["Game (Germany)", "Game (Austria)"]) == "Germany"
+
+
+def test_header_named_discs_get_their_name_and_folder(tmp_path):
+    from app.core.collection import ConsoleResult
+    from app.core.inbox import undo
+    from app.core.rename import apply_renames, make_renames
+    g = tmp_path / "Wii" / "zelda"
+    g.mkdir(parents=True)
+    (g / "zelda.wbfs").write_bytes(b"x")
+    (tmp_path / "halo.iso").write_bytes(b"x")
+    (tmp_path / "ff7.bin").write_bytes(b"x")
+    res = ConsoleResult(BY_KEY["wii"], [str(tmp_path)])
+    res.identified = {str(g / "zelda.wbfs"): ("Zelda (Europe)", True, "Europe"),
+                      str(tmp_path / "halo.iso"): ("Halo (USA)", False, "World"),      # not sure: stays
+                      str(tmp_path / "ff7.bin"): ("Final Fantasy VII (USA)", True, "USA")}   # a track: stays
+    rs = make_renames(res)
+    assert [(Path(r.new).name, bool(r.folder)) for r in rs] == [("Zelda (Europe).wbfs", True)]
+    n, problems, log = apply_renames(rs, tmp_path / "undo")
+    assert (tmp_path / "Wii" / "Zelda (Europe)" / "Zelda (Europe).wbfs").exists() and not problems
+    undo(log)
+    assert (g / "zelda.wbfs").exists()
