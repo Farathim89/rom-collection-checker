@@ -17,7 +17,8 @@ from ..core.collection import find_folders
 from ..core.consoles import BY_KEY, CONSOLES
 from ..core.dat import DatStore
 from ..core.hashing import Tools
-from ..core.inbox import HAD, apply_plan, make_console_folders, make_plan, region_moves, tidy_inbox, undo, write_undo
+from ..core.inbox import (HAD, apply_plan, apply_tidy, make_console_folders, make_plan, region_moves, tidy_inbox,
+                          tidy_plan, undo, write_undo)
 from ..core.rename import apply_renames, make_renames
 from . import theme
 from .icons import console_icon, flag_icon
@@ -162,7 +163,7 @@ class SettingsDialog(QDialog):
         page = QWidget()
         form = QFormLayout(page)
         tabs.addTab(page, "Sorting")
-        self.unpack = QCheckBox("Take ROMs out of zip / 7z / rar (Nintendo DS games stay packed: emulators read .7z)")
+        self.unpack = QCheckBox("Take ROMs out of zip / 7z / rar")
         self.unpack.setChecked(s.unpack)
         self.names = QCheckBox("Give sorted games their No-Intro name")
         self.names.setChecked(s.official_names)
@@ -680,6 +681,78 @@ class RegionDialog(QDialog):
                 problems.append(f"{a.name}: {e}")
         log = write_undo(UNDO, "region folders", done)
         QMessageBox.information(self, "Region folders", f"{len(done)} moved.\nUndo log: {log.name}" +
+                                ("\n\n" + "\n".join(problems[:30]) if problems else ""))
+        self.accept()
+        self.main.scan()
+
+
+class TidyDialog(QDialog):
+    """The non-original sort: what isn't an original game to <games>\\_Non-original, dumps in another form fixed into
+    their region folder, games alone in an archive taken out - a preview first, nothing deleted."""
+
+    def __init__(self, main, results):
+        super().__init__(main)
+        self.main = main
+        s = main.s
+        root = Path(s.games_root)
+        tools = Tools(s.sevenzip, s.winrar_dir, s.dolphin_tool)
+        self.tools = tools
+        self.steps = []
+        for r in results:
+            for st in tidy_plan(r, Path(r.folders[0]), root, main.dats.entries(r.console.dat), tools, unpack=s.unpack):
+                self.steps.append((r.console.name, st))
+        names = ", ".join(r.console.name for r in results) if len(results) <= 3 else f"{len(results)} consoles"
+        self.setWindowTitle(f"Non-originals - {names}")
+        self.resize(1400, 780)
+        v = QVBoxLayout(self)
+        note = QLabel("Translations, unverified dumps, unlicensed games and prototypes go to "
+                      f"{root / '_Non-original'}\\<maker>\\<console> (hidden in MediaDeck; translations get a clean "
+                      "name). Dumps in another form (overdumped, trimmed, byte-swapped, interleaved, reversed bits) "
+                      "become the real dump in their region folder; games alone in an archive are taken out. Old files "
+                      "and archives go to _Duplicates - nothing is deleted. Hacks, randomizers and homebrew keep their tab."
+                      if self.steps else "Nothing to sort: every game is an original in its place.")
+        note.setWordWrap(True)
+        note.setObjectName("muted")
+        v.addWidget(note)
+        self.t = table(["", "Console", "File", "What", "Goes to", "Why"], {0: 30, 1: 160, 2: 420, 3: 110, 4: 420}, 5)
+        self.t.setSortingEnabled(False)
+        self.t.setRowCount(len(self.steps))
+        for i, (con, st) in enumerate(self.steps):
+            chk = Item("")
+            chk.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            chk.setCheckState(Qt.Checked if st.enabled else Qt.Unchecked)
+            chk.setData(Qt.UserRole, i)
+            self.t.setItem(i, 0, chk)
+            self.t.setItem(i, 1, Item(con))
+            self.t.setItem(i, 2, Item(Path(st.source).name))
+            self.t.setItem(i, 3, Item(st.what))
+            goes = (str(Path(st.target).relative_to(root)) if st.target and Path(st.target).is_relative_to(root)
+                    else st.target) or "_Duplicates (you have that game)"
+            self.t.setItem(i, 4, Item(goes))
+            self.t.setItem(i, 5, Item(st.why))
+        self.t.setSortingEnabled(True)
+        v.addWidget(self.t, 1)
+        row = QHBoxLayout()
+        row.addStretch()
+        b = QPushButton("Sort")
+        b.setObjectName("primary")
+        b.setEnabled(bool(self.steps))
+        b.clicked.connect(self.apply)
+        close = QPushButton("Close")
+        close.clicked.connect(self.reject)
+        row.addWidget(b)
+        row.addWidget(close)
+        v.addLayout(row)
+
+    def apply(self) -> None:
+        for r in range(self.t.rowCount()):
+            self.steps[self.t.item(r, 0).data(Qt.UserRole)][1].enabled = self.t.item(r, 0).checkState() == Qt.Checked
+        todo = [st for _c, st in self.steps if st.enabled]
+        if QMessageBox.question(self, "Non-originals", f"Sort {len(todo)} files? (Nothing is deleted; an undo log is "
+                                "kept.)") != QMessageBox.Yes:
+            return
+        n, problems, log = apply_tidy(todo, Path(self.main.s.games_root), self.tools, UNDO)
+        QMessageBox.information(self, "Non-originals", f"{n} done.\nUndo log: {log.name}" +
                                 ("\n\n" + "\n".join(problems[:30]) if problems else ""))
         self.accept()
         self.main.scan()

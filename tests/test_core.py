@@ -609,3 +609,140 @@ def test_track_bins_get_a_cue(tmp_path):
         'FILE "Game (Europe) (Track 2).bin" BINARY\n  TRACK 02 AUDIO\n    INDEX 00 00:00:00\n    INDEX 01 00:02:00\n'
         'FILE "Game (Europe) (Track 3).bin" BINARY\n  TRACK 03 AUDIO\n    PREGAP 00:02:00\n    INDEX 01 00:00:00\n')
     assert ensure_cue(tmp_path) == []
+
+
+def test_dumps_in_another_form_are_found():
+    from app.core import repair
+    game = bytes(range(256)) * 8                       # 2 KB
+    ix = {hashing.crc(game): ["the game"]}
+    assert repair.find_converted(game * 2, [2048], ix)[1] == "cut to 2048"              # an Atari game stored twice
+    assert repair.find_converted(game.translate(repair._REV), [2048], ix)[1] == "bit order"   # US PC Engine card
+    md = bytes(range(256)) * 64                        # 16 KB: SMD layout = odd bytes, then even bytes
+    smd = md[1::2] + md[0::2]
+    assert repair.find_converted(smd, [16384], {hashing.crc(md): ["md"]})[1] == "SMD layout"
+    assert repair.find_converted(b"x" * 2048, [2048], ix) is None
+    hdr = b"NES\x1a\x02\x04" + b"\0" * 10              # an overdump's header counts the junk as CHR
+    assert repair.with_ines_header(hdr, b"\0" * (32768 + 16384))[5] == 2
+
+
+def test_what_a_file_no_intro_does_not_list_is():
+    from app.core.extra import Known
+    from app.core.inbox import kind_of_file, name_region, translation_name
+    assert kind_of_file("Doraemon (J) [T+Eng1.1_Neokid].nes", None) == "Translations"
+    assert kind_of_file("Pitfall (Hack).bin", None) == "0 - Hacks"
+    assert kind_of_file("Mondo Pong (PD).bin", None) == "0 - Homebrew"
+    assert kind_of_file("Frog Pond (Proto).bin", None) == "Prototypes"
+    assert kind_of_file("Asteroids.bin", Known("tosec", "Asteroids", "release")) == "original"
+    assert kind_of_file("treat.bin", None) == "Unverified"
+    titles = {"doraemon": ["Doraemon (Japan)"]}
+    assert translation_name("Doraemon (J) [hM15][T+Eng1.1_Neokid].nes", None, titles) == \
+        ("Doraemon (Japan)[tr en v1.1 Neokid].nes", "Japan")
+    assert translation_name("Chaos Seed.sfc", None, {}) == ("Chaos Seed (Japan)[tr en].sfc", "Japan")
+    assert name_region("Bi! Bi! (PAL) (Australia).bin", {}) == "Australia"
+    assert name_region("Exocet (PAL).bin", {}) == "Europe"
+    assert name_region("Asteroids.bin", {"asteroids": ["Asteroids (USA)"]}) == "USA"
+
+
+def test_non_originals_leave_the_console_folder(tmp_path):
+    from app.core.inbox import apply_tidy, tidy_plan
+    root = tmp_path / "games"
+    nes = root / "Nintendo" / "NES"
+    (nes / "0 - Translations").mkdir(parents=True)
+    (nes / "0 - Hacks").mkdir()
+    (nes / "0 - Translations" / "Other Game (J) [T+Eng].nes").write_bytes(b"translated!")
+    (nes / "0 - Hacks" / "a hack.nes").write_bytes(b"a hack")             # 0 - Hacks stays
+    (nes / "junk.nes").write_bytes(b"not a game")
+    (nes / "junk.sav").write_bytes(b"its save")
+    (nes / "overdump.nes").write_bytes(b"NES\x1a\x02\0" + b"\0" * 10 + BODY + b"\xee" * 32)
+    store = _store(tmp_path)
+    r = scan_console(BY_KEY["nes"], [str(nes)], store, hashing.Tools(), ScanCache(tmp_path / "c.json"), [])
+    steps = tidy_plan(r, nes, root, store.entries(BY_KEY["nes"].dat))
+    by = {Path(s.source).name: s for s in steps}
+    nod = root / "_Non-original" / "Nintendo" / "NES"
+    assert Path(by["Other Game (J) [T+Eng].nes"].target) == nod / "Translations" / "Japan" / "Other Game (Japan)[tr en].nes"
+    assert Path(by["junk.nes"].target) == nod / "Unverified" / "junk.nes"
+    assert Path(by["junk.sav"].target) == nod / "Unverified" / "junk.sav"              # the save goes along
+    assert not by["junk.nes"].enabled and not by["junk.sav"].enabled   # a game with a save: unticked
+    assert by["overdump.nes"].op == "fix" and Path(by["overdump.nes"].target) == nes / "USA" / "Test Game (USA).nes"
+    assert "a hack.nes" not in by
+    n, problems, log = apply_tidy(steps, root, hashing.Tools(), tmp_path / "undo")
+    assert not problems and n == sum(st.enabled for st in steps)
+    fixed = (nes / "USA" / "Test Game (USA).nes").read_bytes()
+    assert fixed[16:] == BODY and fixed[:4] == b"NES\x1a"
+    assert not (nes / "0 - Translations" / "Other Game (J) [T+Eng].nes").exists()
+    assert (root / "_Duplicates" / "_Repaired originals" / "Nintendo" / "NES" / "overdump.nes").is_file()
+    # the next scan: _Non-original is not part of the collection, but counts as yours for the inbox
+    r2 = scan_console(BY_KEY["nes"], [str(nes)], store, hashing.Tools(), ScanCache(tmp_path / "c.json"), [],
+                      games_root=str(root))
+    assert hashing.crc(b"translated!") in r2.crcs and not any("_Non-original" in i.path for i in r2.unknown)
+
+
+def test_inbox_sends_unknown_dumps_to_non_original(tmp_path):
+    inbox = tmp_path / "in"
+    inbox.mkdir()
+    (inbox / "c.nes").write_bytes(b"homebrew!")
+    (inbox / "Some RPG (J) [T+Eng].nes").write_bytes(b"translated rpg")
+    root = tmp_path / "games"
+    target = root / "Nintendo" / "NES"
+    plan = make_plan(str(inbox), {"nes": [str(target)]}, {"nes": set()}, _store(tmp_path), hashing.Tools(), str(root))
+    by = {s.label: s for s in plan.steps}
+    assert Path(by["c.nes"].target).parent == root / "_Non-original" / "Nintendo" / "NES" / "Unverified"
+    assert Path(by["Some RPG (J) [T+Eng].nes"].target).parent == \
+        root / "_Non-original" / "Nintendo" / "NES" / "Translations" / "Japan"
+
+
+def test_a_game_alone_in_an_archive_is_taken_out(tmp_path):
+    from app.core.inbox import apply_tidy, tidy_plan, undo
+    root = tmp_path / "games"
+    nes = root / "Nintendo" / "NES" / "USA"
+    nes.mkdir(parents=True)
+    with zipfile.ZipFile(nes / "Test Game (USA).zip", "w") as z:
+        z.writestr("tg.nes", b"NES\x1a" + b"\0" * 12 + BODY)
+    store = _store(tmp_path)
+    con = nes.parent
+    r = scan_console(BY_KEY["nes"], [str(con)], store, hashing.Tools(), ScanCache(tmp_path / "c.json"), [])
+    steps = tidy_plan(r, con, root, store.entries(BY_KEY["nes"].dat))
+    assert [(s.op, Path(s.target).name) for s in steps] == [("unpack", "Test Game (USA).nes")]
+    n, problems, log = apply_tidy(steps, root, hashing.Tools(), tmp_path / "undo")
+    assert n == 1 and not problems
+    assert (nes / "Test Game (USA).nes").read_bytes()[16:] == BODY
+    assert (root / "_Duplicates" / "_Unpacked archives" / "Nintendo" / "NES" / "USA" / "Test Game (USA).zip").is_file()
+    assert not list(nes.glob("romtidy-*"))                       # no unpack folder left behind
+    undo(log)
+    assert (nes / "Test Game (USA).zip").is_file()
+
+
+def test_a_disc_is_yours_only_when_its_data_track_is(tmp_path):
+    """Silent audio tracks are the same on many discs, and a game's discs share music: no proof you have the disc."""
+    crc = lambda b: f"{zlib.crc32(b) & 0xFFFFFFFF:08X}"  # noqa: E731
+    d = tmp_path / "dats"
+    d.mkdir()
+    silence, data_a, data_b = b"\0" * 2352 * 4, b"DATA A" * 500, b"DATA B" * 500
+    (d / "Sony - PlayStation.dat").write_text(
+        f'game (\n\tname "Owned (Europe)"\n\trom ( name "Owned (Europe) (Track 1).bin" size {len(data_a)} crc {crc(data_a)} )\n'
+        f'\trom ( name "Owned (Europe) (Track 2).bin" size {len(silence)} crc {crc(silence)} )\n)\n', encoding="utf-8")
+    store = dat.DatStore(d)
+    inbox = tmp_path / "in" / "Sony" / "Playstation"
+    inbox.mkdir(parents=True)
+    (inbox / "New Game (Europe) (Track 1).bin").write_bytes(data_b)
+    (inbox / "New Game (Europe) (Track 2).bin").write_bytes(silence)         # the same silence as a disc you have
+    (inbox / "New Game (Europe).cue").write_text('FILE "New Game (Europe) (Track 1).bin" BINARY\n', encoding="utf-8")
+    have = {"ps1": set(hashing.variants(data_a)) | set(hashing.variants(silence))}
+    root = tmp_path / "games"
+    plan = make_plan(str(tmp_path / "in"), {"ps1": [str(root / "Sony" / "Playstation")]}, have, store, hashing.Tools(),
+                     str(root))
+    lead = [s for s in plan.steps if s.action == "move"]
+    assert lead and all(s.reason != "you have it" for s in plan.steps)
+
+
+def test_each_disc_of_a_game_gets_its_cue(tmp_path):
+    from app.core.cue import ensure_cue
+    g = tmp_path / "Resident Evil 2 (Europe)"
+    g.mkdir()
+    for d in ("Disc 1", "Disc 2"):
+        for t in (1, 2):
+            (g / f"RE2 ({d}) (Track {t}).bin").write_bytes(b"\0" * 2352)
+    (g / "RE2 (Disc 1).cue").write_text('FILE "RE2 (Disc 1) (Track 1).bin" BINARY\nFILE "RE2 (Disc 1) (Track 2).bin" BINARY\n',
+                                         encoding="utf-8")
+    assert [p.name for p in ensure_cue(g)] == ["RE2 (Disc 2).cue"]     # Disc 1's sheet doesn't stop Disc 2's
+    assert ensure_cue(g) == []

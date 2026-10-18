@@ -34,7 +34,7 @@ CONSOLES: tuple[Console, ...] = (
     Console("gba", "Game Boy Advance", "Nintendo", "Nintendo - Game Boy Advance", ("gba",),
             ("GameBoy Advance", "Game Boy Advance", "GBA")),
     Console("nds", "Nintendo DS", "Nintendo", "Nintendo - Nintendo DS", ("nds",),
-            ("Nintendo Ds", "Nintendo DS", "NDS", "DS"), keep_archives=True),
+            ("Nintendo Ds", "Nintendo DS", "NDS", "DS")),
     Console("vb", "Virtual Boy", "Nintendo", "Nintendo - Virtual Boy", ("vb", "vboy"),
             ("Nintendo Virtual Boy", "Virtual Boy")),
     Console("sms", "Master System", "Sega", "Sega - Master System - Mark III", ("sms",),

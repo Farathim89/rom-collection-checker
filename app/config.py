@@ -33,7 +33,7 @@ class Settings:
     scope: str = "All"                   # (old setting, read once into regions)
     regions: list[str] = field(default_factory=lambda: list(REGION_KEYS))  # the picker: USA / Europe / Asia / Other
     hidden_regions: list[str] = field(default_factory=list)   # Settings → Regions: hidden everywhere
-    unpack: bool = True                  # take ROMs out of zips when sorting (not DS: emulators read .7z)
+    unpack: bool = True                  # take ROMs out of zip / 7z / rar when sorting
     official_names: bool = True          # sorted games get their No-Intro name
     take_hacks: bool = False             # hacks are sorted in too (translations always are)
     take_unknown: bool = True            # dumps No-Intro doesn't list (homebrew, translations, multicarts)

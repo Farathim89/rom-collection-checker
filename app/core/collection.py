@@ -158,10 +158,11 @@ def index(entries: list[Entry]) -> dict[str, list[Entry]]:
 
 def scan_console(c: Console, folders: list[str], dats: DatStore, tools: Tools, cache: ScanCache,
                  skip: list[str], progress=lambda text: None, stop=lambda: False, extra=None,
-                 quick: bool = False) -> ConsoleResult:
+                 quick: bool = False, games_root: str = "") -> ConsoleResult:
     """extra: an ExtraStore - files No-Intro doesn't list are looked up in TOSEC / hacks / homebrew too.
     quick: discs, DS and N64 games are named by their header (a few KB) instead of a checksum of the whole file;
-    files that already have a checksum count as verified."""
+    files that already have a checksum count as verified. games_root: the files of this console in
+    <games>\\_Non-original count as yours too (their checksums only: not games of the collection)."""
     from .dat import common_region  # noqa: PLC0415
     from .probe import QUICK_CONSOLES, candidates, probe, serial_index  # noqa: PLC0415
     quick = quick and c.key in QUICK_CONSOLES
@@ -293,6 +294,23 @@ def scan_console(c: Console, folders: list[str], dats: DatStore, tools: Tools, c
             else:
                 keep.append(it)
         res.unknown = keep
+    if games_root and folders and not stop():
+        try:
+            rel = Path(folders[0]).relative_to(games_root)
+        except ValueError:
+            rel = None
+        nod = Path(games_root) / "_Non-original" / rel if rel is not None else None
+        for p in walk_files([str(nod)], exts, []) if nod is not None and nod.is_dir() else []:
+            try:
+                st = p.stat()
+            except OSError:
+                continue
+            got = cache.get(p, st)
+            if got is None:
+                got = file_items(p, tools, set(c.exts), set(c.name_only))
+                cache.put(p, st, *got)
+            for it in got[0]:
+                res.crcs.update(it.crcs)
     dup: dict[str, list[str]] = {}
     for (g, _rom), fs in by_game.items():
         if len(set(fs)) > 1:

@@ -75,10 +75,18 @@ def ensure_cue(folder: Path) -> list[Path]:
         m = _TRACK.match(b.stem)
         if m:
             discs.setdefault(m.group(1), []).append((int(m.group(2)), b))
-    has_sheet = any(q.suffix.lower() in (".cue", ".gdi", ".m3u") for q in folder.iterdir())
+    # a disc that a sheet already points at keeps it - per disc: the discs of a game share a folder (Disc 1 / Disc 2)
+    named = ""
+    for q in folder.iterdir():
+        if q.suffix.lower() in (".cue", ".gdi"):
+            try:
+                named += q.read_text(encoding="utf-8", errors="replace").lower()
+            except OSError:
+                pass
     for base, ts in discs.items():
         nos = sorted(n for n, _ in ts)
         cue = folder / f"{base}.cue"
+        has_sheet = any(b.name.lower() in named for _, b in ts)
         if not has_sheet and not cue.exists() and len(ts) > 1 and nos == list(range(1, len(ts) + 1)):
             cue.write_text(tracks_to_cue([b for _, b in sorted(ts)]), encoding="utf-8")
             made.append(cue)

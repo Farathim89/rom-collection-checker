@@ -244,6 +244,8 @@ class MainWindow(QMainWindow):
                 ("✏  Clean names…", self.clean_names, False, "Rename the shown console's games to their No-Intro names"),
                 ("🌍  Region folders…", self.region_folders, False,
                  "Put the shown console's games (on Overview: every console's) into a folder per region"),
+                ("🧹  Non-originals…", self.non_originals, False,
+                 "Translations, unverified dumps … to _Non-original; dumps in another form fixed; archives unpacked"),
                 ("↩  Undo…", self.undo_dialog, False, "Undo a sort or a rename"),
                 ("📋  Copy missing list", self.copy_missing, False, "The missing games shown, to the clipboard"),
                 ("💾  Save missing list…", self.save_missing, False, "The missing games shown, as a text file"),
@@ -826,7 +828,7 @@ class MainWindow(QMainWindow):
                 w.signals.progress.emit(f"Reading {c.name}…")
                 out[k] = scan_console(c, folders, self.dats, tools, self.cache, self.s.skip_folders,
                                       w.signals.progress.emit, lambda: w.stop, extra=self.extra,
-                                      quick=self.s.quick_check)
+                                      quick=self.s.quick_check, games_root=self.s.games_root)
                 self.cache.save()
             return out, wrong_console(out, self.dats)
 
@@ -915,6 +917,16 @@ class MainWindow(QMainWindow):
             return
         from .dialogs import RegionDialog  # noqa: PLC0415
         RegionDialog(self, results).exec()
+
+    def non_originals(self) -> None:
+        key = self.current_key()
+        results = [self.results[key]] if key in self.results else             list(self.results.values()) if self.menu.currentItem() and self.menu.currentItem().data(Qt.UserRole) == "overview" else []
+        if not results:
+            QMessageBox.information(self, "Pick a console", "Scan first, then select a console on the left "
+                                    "(or Overview for every console).")
+            return
+        from .dialogs import TidyDialog  # noqa: PLC0415
+        TidyDialog(self, results).exec()
 
     # -- self-update ----------------------------------------------------------------------------------
     def check_updates(self, manual: bool = True, ask: bool = True) -> None:
@@ -1027,7 +1039,7 @@ class MainWindow(QMainWindow):
 
         def job(w: Worker):
             r = scan_console(c, folders, self.dats, tools, self.cache, self.s.skip_folders, w.signals.progress.emit,
-                             lambda: w.stop, extra=self.extra, quick=False)
+                             lambda: w.stop, extra=self.extra, quick=False, games_root=self.s.games_root)
             self.cache.save()
             return r
 

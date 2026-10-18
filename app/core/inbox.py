@@ -11,13 +11,14 @@ import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from .collection import _TRACK, index, match_by_name, name_index, walk_files
+from .collection import _TRACK, COLLECTION, index, match_by_name, name_index, walk_files
 from .consoles import ARCHIVES, BY_KEY, CONSOLES, Console, consoles_for_ext
 from .dat import REGION_NAMES, DatStore, common_region, kind_of, region_folder  # noqa: F401
 from .hashing import Tools, file_items
 from . import cue, repair
 from .probe import QUICK_CONSOLES, identify, probe, serial_index
 
+_TRACK1 = re.compile(r"\(Track 0*1\)", re.I)   # a disc's data track
 NO_CHECKSUM = {"wbfs", "pbp", "cso", "chd", "cdi", "ciso", "nsp", "nsz", "xci", "xcz"}
 
 BAD = re.compile(r"\[b\d*\]|\(Bad\)|\(Bad Dump\)", re.I)
@@ -329,9 +330,13 @@ def make_plan(inbox: str, folders: dict[str, list[str]], have_crcs: dict[str, se
                                             if st.fix_size else "new") if st.game else (
                 "translation" if TRANSLATION.search(name) else not_in)
             dest = console_dest(c, folders, games_root)
-            if not st.game:      # a dump the list doesn't know: its own tab, not among the verified games
-                dest = dest / ("0 - Translations" if TRANSLATION.search(name) else
-                               "0 - Hacks" if HACK.search(name) else "0 - Unverified")
+            if not st.game:      # a dump the list doesn't know: not among the verified games (see NON_ORIGINAL)
+                if HACK.search(name) and not TRANSLATION.search(name):
+                    dest = dest / "0 - Hacks"
+                elif TRANSLATION.search(name) or TOSEC_TR.search(name):
+                    dest = non_original_dir(dest, Path(games_root), "Translations", name_region(name, {}) or "Japan")
+                else:
+                    dest = non_original_dir(dest, Path(games_root), "Unverified")
             if c.keep_archives and it.inner and len(items) == 1 and not st.fix_size:   # one game per archive: stays packed
                 st.unpack = False
             if it.inner and not st.unpack:          # the archive itself moves (DS .7z)
@@ -410,8 +415,12 @@ def _join_discs(plan: Plan, folders: dict[str, list[str]], games_root: str, offi
             groups.setdefault(key, []).append(st)
     for (_where, base, key), steps in groups.items():
         c = BY_KEY[key]
-        if any(s.reason in ("you have it", "same as another file here") for s in steps):
-            for s in steps:                    # one known track = you have this disc
+        # its data track decides (Track 1, or the file without a track number): audio tracks are no proof - silent
+        # ones are the same on many discs, and the discs of one game share music (Resident Evil 2 Disc 1 / Disc 2)
+        data = [s for s in steps if not _TRACK.search(Path(s.inner or s.source).stem)
+                or _TRACK1.search(Path(s.inner or s.source).stem)] or steps
+        if any(s.reason in ("you have it", "same as another file here") for s in data):
+            for s in steps:                    # its data track is known = you have this disc
                 s.action, s.target = "leave", ""
                 if s.reason not in ("you have it", "same as another file here"):
                     s.reason = "you have it"
@@ -716,3 +725,292 @@ def region_moves(res, root: Path) -> list[tuple[Path, Path]]:
             taken.add(q)
             moves.append((q, dst))
     return moves
+
+
+# What isn't an original game leaves the console folder: <games>\_Non-original\<maker>\<console>\<kind>\ (a "_" folder:
+# not scanned as games, hidden in MediaDeck). Hacks, randomizers, homebrew ... keep their "0 - " tab in the console.
+NON_ORIGINAL = "_Non-original"
+NON_ORIGINAL_TABS = {"0 - Translations": "Translations", "0 - Unverified": "Unverified", "0 - Unlicensed": "Unlicensed",
+                     "0 - Prototypes": "Prototypes", "0 - Bad dumps": "Bad dumps"}
+PROTO = re.compile(r"\((Proto|Prototype|Beta|Alpha)\b[^)]*\)", re.I)
+UNLICENSED = re.compile(r"\((Unl|Pirate|Bootleg)\)", re.I)
+PUBLIC_DOMAIN = re.compile(r"\((PD|Homebrew|Freeware)\)", re.I)
+TOSEC_TR = re.compile(r"\[tr\s+([a-z-]+)\s*([^\]]*)\]", re.I)                       # [tr en v1.2 Group]
+GOOD_TR = re.compile(r"\[T[+-]([A-Za-z]{3})([^\]]*)\]")                              # [T+Eng1.1_Group]
+GOOD_REGION = {"J": "Japan", "U": "USA", "E": "Europe", "W": "World", "JU": "World", "UE": "World", "JUE": "World",
+               "UEJ": "World", "F": "France", "G": "Germany", "S": "Spain", "B": "Brazil", "K": "Korea", "C": "China",
+               "Ch": "China", "A": "Australia", "I": "Italy", "Sw": "Sweden", "Nl": "Netherlands", "PAL": "Europe"}
+GOOD_LANG = {"eng": "en", "fre": "fr", "fra": "fr", "spa": "es", "esp": "es", "por": "pt-br", "bra": "pt-br", "ger": "de",
+             "deu": "de", "ita": "it", "swe": "sv", "rus": "ru", "pol": "pl", "chi": "zh", "dut": "nl", "nor": "no",
+             "dan": "da", "fin": "fi", "gre": "el", "heb": "he", "cat": "ca"}
+UNPACKED = "_Unpacked archives"        # <games>\_Duplicates\_Unpacked archives\...: archives whose game was taken out
+REPAIRED = "_Repaired originals"       # <games>\_Duplicates\_Repaired originals\...: old forms of fixed dumps
+SAVE_EXT = re.compile(r"\.(sav|srm|bs\d|eep|fla|sra|mpk|ngf|st\d|state\d*|\d{3})$", re.I)
+
+
+@dataclass
+class TidyStep:
+    """One line of the non-original sort: move a file, write the real dump of a converted one (the old file goes to
+    _Duplicates), or take a game out of its archive (the archive goes to _Duplicates)."""
+    source: str
+    target: str
+    what: str                  # Translations / Unverified / original / 0 - Hacks / fixed / unpacked / goes with it
+    why: str = ""
+    op: str = "move"           # move / fix / unpack
+    inner: str = ""            # unpack: the game file in the archive
+    fix_how: str = ""          # fix: the conversion (repair.conversions)
+    fix_size: int = 0
+    enabled: bool = True
+
+
+def non_original_dir(console_folder: Path, games_root: Path, kind: str, region: str = "") -> Path:
+    """<games>\\_Non-original\\<the console folder's path under the games folder>\\<kind>[\\<region>]."""
+    try:
+        rel = console_folder.relative_to(games_root)
+    except ValueError:
+        rel = Path(console_folder.name)
+    d = games_root / NON_ORIGINAL / rel / kind
+    return d / region if region else d
+
+
+def name_region(name: str, titles: dict[str, list[str]]) -> str:
+    """A region folder from a file name: No-Intro style "(USA, Europe)", GoodTools "(J)" / "(PAL)", else the region
+    of the No-Intro game of that title; "" when nothing says."""
+    stem = re.sub(r"\.[A-Za-z0-9]{1,5}$", "", name)
+    reg = region_folder(stem) or next((region_folder(f"x ({g})") for g in re.findall(r"\(([^)]+)\)", stem)
+                                       if region_folder(f"x ({g})")), "")
+    if reg:                                          # also behind another tag: "Bi! Bi! (PAL) (Australia)"
+        return reg
+    good = re.search(r"\((" + "|".join(sorted(GOOD_REGION, key=len, reverse=True)) + r")\)", stem)
+    if good:
+        return GOOD_REGION[good.group(1)]
+    return common_region(titles.get(norm_title(name), []))
+
+
+def kind_of_file(name: str, known) -> str:
+    """What a file No-Intro doesn't list is: original (a release TOSEC knows), Translations, 0 - Hacks,
+    0 - Homebrew, Prototypes, Unlicensed, Bad dumps or Unverified."""
+    k, kname = (known.kind, known.name) if known else ("", "")
+    if k == "translation" or TRANSLATION.search(name) or TOSEC_TR.search(name):
+        return "Translations"
+    if k == "hack" or HACK.search(name):
+        return "0 - Hacks"
+    if k == "homebrew" or PUBLIC_DOMAIN.search(name) or PUBLIC_DOMAIN.search(kname):
+        return "0 - Homebrew"
+    if PROTO.search(name) or PROTO.search(kname):
+        return "Prototypes"
+    if UNLICENSED.search(name):
+        return "Unlicensed"
+    if k == "bad" or BAD.search(name):
+        return "Bad dumps"
+    return "original" if k == "release" else "Unverified"
+
+
+def translation_name(name: str, known, titles: dict[str, list[str]]) -> tuple[str, str]:
+    """(clean name, its region) of a translation: TOSEC's when it knows the file, else
+    "<No-Intro title> (<region>)[b][tr <lang> <version> <group>]" from GoodTools / TOSEC tags in the name
+    (no language tag: English, what nearly every translation is)."""
+    ext = Path(name).suffix.lower()
+    stem = Path(name).stem
+    if known and known.kind == "translation":
+        return SAFE.sub("_", known.name) + ext, region_folder(known.name) or name_region(stem, titles) or "Japan"
+    lang, extra = "en", ""
+    good, tr = GOOD_TR.search(stem), TOSEC_TR.search(stem)
+    if good:
+        lang = GOOD_LANG.get(good.group(1).lower(), good.group(1).lower())
+        m = re.match(r"([0-9][0-9a-z.]*)?[_ ]?(.*)", good.group(2).strip())
+        extra = " ".join(x for x in [("v" + m.group(1)) if m.group(1) else "", m.group(2).replace("_", " ").strip()] if x)
+    elif tr:
+        lang, extra = tr.group(1).lower(), tr.group(2).strip()
+    title = re.split(r"\s*[(\[]", stem)[0].strip()
+    region = name_region(stem, {})
+    games = titles.get(norm_title(name), [])
+    pick = [g for g in games if region and region in g] or [g for g in games if "(Japan" in g] or games
+    if pick:                                        # the No-Intro spelling of the game, and its region
+        title = re.split(r"\s*\(", pick[0])[0]
+        region = region or region_folder(pick[0])
+    flags = "".join(f"[{t}]" for t in ("b", "o", "a") if re.search(rf"\[{t}\d*\]", stem))
+    region = region or "Japan"                     # translations are nearly always of Japan-only games
+    return SAFE.sub("_", f"{title} ({region}){flags}[tr {lang}{(' ' + extra) if extra else ''}]") + ext, region
+
+
+def tidy_plan(res, root: Path, games_root: Path, entries, tools: Tools | None = None,
+              unpack: bool = True) -> list[TidyStep]:
+    """The non-original sort of one cartridge console (see NON_ORIGINAL): a file No-Intro doesn't list - in the
+    console folder or a 0 - Translations / Unverified / Unlicensed / Prototypes tab - that is a listed dump once
+    converted (repair.conversions) gets that dump written into its region folder under its No-Intro name (nothing
+    when you have it already); else it goes to _Non-original (translations with a clean name, in a folder per region
+    of the original game), hacks and homebrew into their tab, releases TOSEC knows into their region folder.
+    No-Intro games in those tabs go to their region folder. unpack: a game alone in a zip / 7z / rar is taken out.
+    Other 0 - tabs (Hacks, Randomizer, Homebrew ...) stay. A loose file takes its save (same name) along."""
+    from . import repair  # noqa: PLC0415
+    if res.console.source != "no-intro":
+        return []
+    titles: dict[str, list[str]] = {}
+    for t in res.titles.values():
+        for g in t.games:
+            titles.setdefault(norm_title(g), []).append(g)
+    ix = index(entries)
+    sizes = sorted({e.size for e in entries if e.size})
+    have_names = {q.stem.lower() for q in root.rglob("*") if q.is_file() and not COLLECTION.search(str(q))}
+
+    def tab_of(p: Path) -> str | None:
+        """"" in the console folder or a region folder, the tab's name in a non-original tab, None elsewhere."""
+        try:
+            parts = p.relative_to(root).parts
+        except ValueError:
+            return None
+        if parts[0].startswith("_") or (parts[0].startswith("0 - ") and parts[0] not in NON_ORIGINAL_TABS):
+            return None
+        return parts[0] if parts[0] in NON_ORIGINAL_TABS else ""
+
+    steps: list[TidyStep] = []
+    labels = {it.label: it for it in res.others}
+    archives: dict[str, list[str]] = {}
+    for label in list(res.matched) + list(labels):
+        if " › " in label:
+            archives.setdefault(label.split(" › ")[0], []).append(label.split(" › ", 1)[1])
+    for label, es in res.matched.items():       # No-Intro games: out of their archive, out of a non-original tab
+        p = Path(label.split(" › ")[0])
+        tab = tab_of(p)
+        if tab is None:
+            continue
+        reg = (region_folder(es[0].game) or "World") if tab else ""
+        dest = (root / reg) if tab else p.parent
+        if " › " in label and unpack and len(archives.get(str(p), [])) == 1:
+            inner = label.split(" › ", 1)[1]
+            steps.append(TidyStep(str(p), str(dest / (p.stem + Path(inner).suffix.lower())), "unpacked",
+                                  es[0].game, op="unpack", inner=inner))
+        elif tab and len({e.game for e in es}) == 1:
+            steps.append(TidyStep(str(p), str(dest / p.name), "original", es[0].game))
+    for label, it in labels.items():
+        p = Path(label.split(" › ")[0])
+        tab = tab_of(p)
+        if tab is None or str(p) in res.matched:
+            continue
+        k = res.known.get(label)
+        kind = kind_of_file(p.name, k)
+        if not it.inner and kind not in ("Translations", "0 - Hacks", "0 - Homebrew"):
+            data = repair.item_bytes(p, "", tools) if tools else (p.read_bytes() if p.stat().st_size <= repair.LIMIT else None)
+            hit = repair.find_converted(data, sizes, ix) if data else None
+            if hit:
+                e, how, _dump = hit
+                rom = e.rom if res.console.key != "nes" else Path(e.rom).stem + ".nes"
+                if PROTO.search(e.game):
+                    dest = non_original_dir(root, games_root, "Prototypes") / rom
+                else:
+                    dest = root / (region_folder(e.game) or "World") / rom
+                had = Path(rom).stem.lower() in have_names
+                steps.append(TidyStep(str(p), str(dest), "fixed", f"{e.game} ({how})" + (" - you have it" if had else ""),
+                                      op="fix", fix_how=how, fix_size=e.size, enabled=True))
+                if had:
+                    steps[-1].target = ""        # only the old file goes (to _Duplicates)
+                continue
+        why = kind.removeprefix("0 - ").lower() + (f" ({k.source}: {k.name})" if k else "")
+        if kind == "original":
+            reg = name_region(k.name if k else p.name, titles) or name_region(p.name, titles)
+            if reg and p.parent != root / reg:
+                steps.append(TidyStep(str(p), str(root / reg / p.name), "original", f"{k.source}: {k.name}"))
+            continue
+        if kind.startswith("0 - "):
+            if p.parent != root / kind:
+                steps.append(TidyStep(str(p), str(root / kind / p.name), kind, why))
+            continue
+        if kind == "Translations" and not it.inner:
+            new, reg = translation_name(p.name, k, titles)
+            steps.append(TidyStep(str(p), str(non_original_dir(root, games_root, kind, reg) / new), kind, why))
+        else:
+            dest = non_original_dir(root, games_root, kind, "Japan" if kind == "Translations" else "")
+            steps.append(TidyStep(str(p), str(dest / p.name), kind, why))
+    out, taken, seen = [], set(), set()
+    for st in steps:
+        if st.source in seen or st.source == st.target:
+            continue
+        seen.add(st.source)
+        if st.target and st.op == "fix" and (st.target.lower() in taken or Path(st.target).exists()):
+            st.target = ""                   # that dump is there already: only the old file goes
+        elif st.target:
+            t = Path(st.target)
+            while str(t).lower() in taken or t.exists():          # two files to one name: an alternate
+                t = t.with_name(f"{t.stem}[a]{t.suffix}")
+            st.target = str(t)
+        if st.target:
+            taken.add(st.target.lower())
+        out.append(st)
+        src = Path(st.source)
+        if st.op == "move" and st.target:        # its save, a sidecar of the same name
+            stem = src.stem.lower()
+            for q in src.parent.iterdir():
+                if q.is_file() and q != src and q.stem.lower() == stem and str(q) not in seen and \
+                        not q.suffix.lower().lstrip(".") in res.console.exts:
+                    seen.add(str(q))
+                    out.append(TidyStep(str(q), str(Path(st.target).with_name(Path(st.target).stem + q.suffix)),
+                                        "goes with it", src.name))
+                    if SAVE_EXT.search(q.name) and st.what not in ("original", "0 - Hacks", "0 - Homebrew"):
+                        st.enabled = out[-1].enabled = False     # a game being played: leaving it is your choice
+                        st.why += " - a save next to it: unticked"
+    return out
+
+
+def apply_tidy(steps: list[TidyStep], games_root: Path, tools: Tools, undo_dir: Path) -> tuple[int, list[str], Path]:
+    """Carries out the checked lines; nothing is deleted: old forms and archives go to <games>\\_Duplicates\\...
+    Undo log as for a sort."""
+    import os  # noqa: PLC0415
+    from . import repair  # noqa: PLC0415
+    done, problems, n = [], [], 0
+
+    def park(p: Path, sub: str) -> Path:
+        try:
+            rel = p.relative_to(games_root)
+        except ValueError:
+            rel = Path(p.name)
+        to = games_root / "_Duplicates" / sub / rel
+        to.parent.mkdir(parents=True, exist_ok=True)
+        os.rename(p, to)
+        done.append({"op": "moved", "from": str(p), "to": str(to)})
+        return to
+
+    for st in (s for s in steps if s.enabled):
+        src, dst = Path(st.source), Path(st.target) if st.target else None
+        try:
+            if not src.exists():
+                problems.append(f"gone: {src}")
+                continue
+            if dst is not None and dst.exists():
+                problems.append(f"in the way, left alone: {dst}")
+                continue
+            if st.op == "move":
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                os.rename(src, dst)                     # same drive: a rename, never over a file
+                done.append({"op": "moved", "from": str(src), "to": str(dst)})
+            elif st.op == "fix":
+                if dst is not None:
+                    data = src.read_bytes()
+                    dump = dict(repair.conversions(data, st.fix_size)).get(st.fix_how)
+                    if dump is None:
+                        problems.append(f"{src.name}: could not convert")
+                        continue
+                    if data[:4] == b"NES\x1a" and dst.suffix.lower() == ".nes":
+                        dump = repair.with_ines_header(data, dump)
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    with open(dst, "xb") as f:
+                        f.write(dump)
+                    done.append({"op": "created", "path": str(dst)})
+                park(src, REPAIRED)
+            elif st.op == "unpack":
+                with tempfile.TemporaryDirectory(prefix="romtidy-", dir=src.parent) as tmp:
+                    if not tools.extract_all(src, Path(tmp)):
+                        problems.append(f"{src.name}: could not unpack")
+                        continue
+                    got = Path(tmp) / Path(st.inner).name
+                    if not got.is_file():
+                        problems.append(f"{src.name}: {st.inner} not found in it")
+                        continue
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(got), str(dst))
+                done.append({"op": "created", "path": str(dst)})
+                park(src, UNPACKED)
+            n += 1
+        except OSError as e:
+            problems.append(f"{src.name}: {e}")
+    return n, problems, write_undo(undo_dir, "non-original sort", done)
