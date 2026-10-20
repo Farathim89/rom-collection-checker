@@ -925,27 +925,33 @@ def tidy_plan(res, root: Path, games_root: Path, entries, tools: Tools | None = 
             dest = non_original_dir(root, games_root, kind, "Japan" if kind == "Translations" else "")
             steps.append(TidyStep(str(p), str(dest / p.name), kind, why))
     # Back from this console's _Non-original (an older sort, a hand move): a clean dump - as it is, or written in its
-    # real form like a fixed dump (the old file then goes to _Duplicates) - and every prototype (0 - Prototypes)
+    # real form like a fixed dump (the old file then goes to _Duplicates) - and every prototype (0 - Prototypes).
+    # The scan has every file's checksums there (res.non_original, from its cache): only a file whose checksum is
+    # listed is read, so the dialog opens at once even with thousands of files in _Non-original.
     nonorig = non_original_dir(root, games_root, "")
-    if nonorig.is_dir():
-        for q in sorted(nonorig.rglob("*")):
-            if not q.is_file() or q.suffix.lower().lstrip(".") not in res.console.exts or q.stat().st_size > repair.LIMIT:
-                continue
+    for path, crcs in sorted(res.non_original.items()):
+        q = Path(path)
+        try:
+            first = q.relative_to(nonorig).parts[0]
+        except (ValueError, IndexError):
+            continue
+        hit = None
+        if crcs & ix.keys() and q.is_file() and q.stat().st_size <= repair.LIMIT:
             hit = repair.find_converted(q.read_bytes(), sizes, ix)
-            if not hit:
-                if q.relative_to(nonorig).parts[0] == "Prototypes" or PROTO.search(q.name):
-                    steps.append(TidyStep(str(q), str(root / "0 - Prototypes" / q.name), "0 - Prototypes", "prototype"))
-                continue
-            e, how, _dump = hit
-            rom = e.rom if res.console.key != "nes" else Path(e.rom).stem + ".nes"
-            had = Path(rom).stem.lower() in have_names
-            if how == "as is":
-                if not had:
-                    steps.append(TidyStep(str(q), str(home_of(e.game) / rom), "original", f"{e.game} (a clean dump)"))
-                continue
-            steps.append(TidyStep(str(q), "" if had else str(home_of(e.game) / rom), "fixed",
-                                  f"{e.game} ({how})" + (" - you have it" if had else ""),
-                                  op="fix", fix_how=how, fix_size=e.size))
+        if not hit:
+            if first == "Prototypes" or PROTO.search(q.name):
+                steps.append(TidyStep(str(q), str(root / "0 - Prototypes" / q.name), "0 - Prototypes", "prototype"))
+            continue
+        e, how, _dump = hit
+        rom = e.rom if res.console.key != "nes" else Path(e.rom).stem + ".nes"
+        had = Path(rom).stem.lower() in have_names
+        if how == "as is":
+            if not had:
+                steps.append(TidyStep(str(q), str(home_of(e.game) / rom), "original", f"{e.game} (a clean dump)"))
+            continue
+        steps.append(TidyStep(str(q), "" if had else str(home_of(e.game) / rom), "fixed",
+                              f"{e.game} ({how})" + (" - you have it" if had else ""),
+                              op="fix", fix_how=how, fix_size=e.size))
     out, taken, seen = [], set(), set()
     for st in steps:
         if st.source in seen or st.source == st.target:

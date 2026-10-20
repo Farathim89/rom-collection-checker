@@ -926,7 +926,9 @@ class MainWindow(QMainWindow):
                                     "(or Overview for every console).")
             return
         from .dialogs import TidyDialog  # noqa: PLC0415
-        TidyDialog(self, results).exec()
+        # worked out in the background (big unknown dumps take a while); the window stays usable meanwhile
+        self.run(lambda w: TidyDialog.plan(self, results, w.signals.progress.emit),
+                 lambda steps: TidyDialog(self, results, steps).exec(), "Working out the non-original sort…")
 
     # -- self-update ----------------------------------------------------------------------------------
     def check_updates(self, manual: bool = True, ask: bool = True) -> None:

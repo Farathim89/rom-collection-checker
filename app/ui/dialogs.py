@@ -690,17 +690,27 @@ class TidyDialog(QDialog):
     """The non-original sort: what isn't an original game to <games>\\_Non-original, dumps in another form fixed into
     their region folder, games alone in an archive taken out - a preview first, nothing deleted."""
 
-    def __init__(self, main, results):
+    @staticmethod
+    def plan(main, results, progress=lambda text: None) -> list:
+        """[(console name, step)] - slow for big unknown dumps (every repaired form is tried): the main window runs
+        it in the background, then opens the dialog with it."""
+        s = main.s
+        tools = Tools(s.sevenzip, s.winrar_dir, s.dolphin_tool)
+        out = []
+        for r in results:
+            progress(f"Non-originals: {r.console.name}…")
+            for st in tidy_plan(r, Path(r.folders[0]), Path(s.games_root), main.dats.entries(r.console.dat), tools,
+                                unpack=s.unpack):
+                out.append((r.console.name, st))
+        return out
+
+    def __init__(self, main, results, steps=None):
         super().__init__(main)
         self.main = main
         s = main.s
         root = Path(s.games_root)
-        tools = Tools(s.sevenzip, s.winrar_dir, s.dolphin_tool)
-        self.tools = tools
-        self.steps = []
-        for r in results:
-            for st in tidy_plan(r, Path(r.folders[0]), root, main.dats.entries(r.console.dat), tools, unpack=s.unpack):
-                self.steps.append((r.console.name, st))
+        self.tools = Tools(s.sevenzip, s.winrar_dir, s.dolphin_tool)
+        self.steps = steps if steps is not None else self.plan(main, results)
         names = ", ".join(r.console.name for r in results) if len(results) <= 3 else f"{len(results)} consoles"
         self.setWindowTitle(f"Non-originals - {names}")
         self.resize(1400, 780)

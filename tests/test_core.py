@@ -702,7 +702,8 @@ def test_prototypes_go_to_their_tab_and_clean_dumps_come_back_from_non_original(
     (nod / "Unverified" / "Lost Game (USA) (Proto).nes").write_bytes(PROTO_BODY)                 # clean, as it is
     (nod / "Unverified" / "clean.nes").write_bytes(b"NES\x1a" + b"\0" * 12 + BODY)                # clean once fixed
     (nod / "Unverified" / "junk.nes").write_bytes(b"really unverified")
-    r = scan_console(BY_KEY["nes"], [str(nes)], store, hashing.Tools(), ScanCache(tmp_path / "c.json"), [])
+    r = scan_console(BY_KEY["nes"], [str(nes)], store, hashing.Tools(), ScanCache(tmp_path / "c.json"), [],
+                     games_root=str(root))
     steps = tidy_plan(r, nes, root, store.entries(BY_KEY["nes"].dat))
     by = {Path(s.source).name: s for s in steps}
     tab = nes / "0 - Prototypes"

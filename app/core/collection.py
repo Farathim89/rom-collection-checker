@@ -137,6 +137,7 @@ class ConsoleResult:
     by_name: dict = field(default_factory=dict)     # item label -> game, for discs that can only be matched by name
     identified: dict = field(default_factory=dict)  # label -> (game, sure): named by its header, not verified
     extras: dict = field(default_factory=dict)      # Switch: game -> [(update / dlc, version, title id, file)]
+    non_original: dict = field(default_factory=dict)  # file in this console's _Non-original -> its CRC variants
 
     def counts(self, kinds: set[str], scope) -> tuple[int, int]:
         """(titles in scope, titles you have - any version of them counts)."""
@@ -309,8 +310,10 @@ def scan_console(c: Console, folders: list[str], dats: DatStore, tools: Tools, c
             if got is None:
                 got = file_items(p, tools, set(c.exts), set(c.name_only))
                 cache.put(p, st, *got)
+            mine = res.non_original.setdefault(str(p), set())
             for it in got[0]:
                 res.crcs.update(it.crcs)
+                mine.update(it.crcs)
     dup: dict[str, list[str]] = {}
     for (g, _rom), fs in by_game.items():
         if len(set(fs)) > 1:
