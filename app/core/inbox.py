@@ -66,6 +66,78 @@ CHIP = re.compile(r"(?:^|[-_.])(?:[a-z]{1,3}\d{1,2}[a-z]?|\d{1,3}[a-z])\.(?:rom|
 NOT_GAME = re.compile(r"\.(?:srm|sav|spc|rsp|st\d|\d{3}|state\d*|sv|cht|ips|bps|ups|txt|nfo|exe|me)$", re.I)
 
 
+PSN_REGION = {"EP": "Europe", "UP": "USA", "JP": "Japan", "HP": "Asia", "KP": "Korea"}
+_PSN_ID = re.compile(r"([A-Z]{2})\d{4}-(NP[EUJHK][AB]\d{5})_\d{2}-[A-Z0-9]{16}")
+
+
+def psn_package(p: Path) -> tuple[str, str, str] | None:
+    """A PlayStation 3 PSN download (.pkg with the PKG header and a PS3 title ID: NPEA/NPEB Europe, NPUA/NPUB USA,
+    NPJA/NPJB Japan …): (content ID, title ID, region); None for anything else (PSP / Vita packages, other files)."""
+    if p.suffix.lower() != ".pkg":
+        return None
+    try:
+        with open(p, "rb") as f:
+            h = f.read(0x60)
+    except OSError:
+        return None
+    if h[:4] != b"\x7fPKG":
+        return None
+    cid = h[0x30:0x54].split(b"\0")[0].decode("latin1", "replace")
+    m = _PSN_ID.fullmatch(cid)
+    return (cid, m.group(2), PSN_REGION.get(m.group(1), "")) if m else None
+
+
+def psone_classic(p: Path) -> str:
+    """The title ID of a PSone Classic package (NPUJ / NPEJ / NPJJ …: a PS1 game sold on the PS3 store), else ""."""
+    try:
+        with open(p, "rb") as f:
+            h = f.read(0x60)
+    except OSError:
+        return ""
+    m = re.fullmatch(r"[A-Z]{2}\d{4}-(NP[EUJHK]J\d{5})_\d{2}-[A-Z0-9]{16}", h[0x30:0x54].split(b"\0")[0].decode("latin1", "replace"))
+    return m.group(1) if h[:4] == b"\x7fPKG" and m else ""
+
+
+def psn_step(p: Path, inbox: Path, folders: dict[str, list[str]], games_root: str) -> Step:
+    """A PSN game: the package and its licence (.rap with the same content ID) move together into
+    <PlayStation 3>\\<region>\\<game>\\ - named after its inbox folder (a retail package's title is encrypted)."""
+    cid, tid, reg = psn_package(p)
+    parent = p.parent.name if p.parent != inbox and p.parent.name.lower() not in \
+        {f.lower() for f in BY_KEY["ps3"].folders} else ""
+    name = SAFE.sub("_", parent or tid)
+    if reg and not re.search(r"\((USA|Europe|Japan|Asia|Korea|World)[^)]*\)", name):
+        name += f" ({reg})"
+    files = [str(p)] + sorted(str(q) for q in p.parent.iterdir()
+                             if q.is_file() and q.suffix.lower() in (".rap", ".rif", ".edat") and (cid in q.name or tid in q.name))
+    dest = place(console_dest(BY_KEY["ps3"], folders, games_root), name, folder=True,
+                 region=reg if REGION_FOLDERS[0] else "")
+    st = Step(str(p), console="ps3", game=name, action="move", reason="new (PSN package)", target=dest, files=files)
+    if (Path(dest) / p.name).exists():
+        st.action, st.reason, st.target, st.files = "leave", "you have it", "", []
+    elif len(files) == 1:
+        st.reason += " - no licence (.rap) next to it"
+    return st
+
+
+FLOPPY_SIZES = {163840, 184320, 327680, 368640, 737280, 1228800, 1474560, 1720320, 1763328, 2949120}
+
+
+def is_floppy_image(p: Path) -> bool:
+    """A PC floppy disk image (.img / .ima / .dsk of 160 KB - 2.88 MB with a DOS boot sector: jump, OEM name, 512
+    bytes per sector, 55 AA) - a DOS / Windows disk, not a console game (an .img could otherwise be a PlayStation
+    disc)."""
+    if p.suffix.lower() not in (".img", ".ima", ".dsk", ".vfd", ".flp"):
+        return False
+    try:
+        if p.stat().st_size not in FLOPPY_SIZES:
+            return False
+        with open(p, "rb") as f:
+            b = f.read(512)
+    except OSError:
+        return False
+    return len(b) == 512 and b[0] in (0xEB, 0xE9) and b[510:512] == b"\x55\xaa" and b[11:13] == b"\x00\x02"
+
+
 def is_arcade_set(items) -> bool:
     """An archive of chip dumps (MAME / Neo Geo MVS: 030-p1.rom, 030-c1.rom ...) is an arcade set, not a game file."""
     inner = [i.inner for i in items if i.inner]
@@ -198,7 +270,7 @@ def make_plan(inbox: str, folders: dict[str, list[str]], have_crcs: dict[str, se
         if key in BY_KEY and dats.have(BY_KEY[key].dat):
             owned[key] = {norm_title(e.title) for e in dats.entries(BY_KEY[key].dat) if e.crc in have}
     all_exts = {e for c in CONSOLES for e in c.exts} | set(ARCHIVES)
-    files = walk_files([inbox], all_exts, [])
+    files = walk_files([inbox], all_exts | {"pkg"}, [])       # .pkg: PS3 PSN downloads (psn_step)
     seen: dict[tuple[str, str], str] = {}       # (console, crc) -> first inbox file with it
     disc_names: dict[str, dict[str, str]] = {}   # console -> Redump name index (for discs matched by name)
     serials: dict[str, dict] = {}                # console -> serial index (for discs named by their header)
@@ -219,6 +291,17 @@ def make_plan(inbox: str, folders: dict[str, list[str]], have_crcs: dict[str, se
             rel = ()
         if any(ARCADE.search(part) for part in rel):
             plan.steps.append(Step(str(p), reason="arcade (not checked)"))
+            continue
+        if is_floppy_image(p):
+            plan.steps.append(Step(str(p), reason="PC floppy disk (not a console game)"))
+            continue
+        if p.suffix.lower() == ".pkg":
+            if psn_package(p):
+                plan.steps.append(psn_step(p, Path(inbox), folders, games_root))
+            else:
+                classic = psone_classic(p)
+                plan.steps.append(Step(str(p), reason=f"PSone Classic {classic} (a PS1 game from the PS3 store - RPCS3 "
+                                                      "can't play it)" if classic else "package, not a PS3 PSN game (not checked)"))
             continue
         # images that can't match a checksum (trimmed .wbfs, .pbp, .cso …) aren't read whole: their header names them;
         # a big disc image (> 1 GB) too, when its header names it (Xbox 360 / PS2 / Wii …: seconds instead of minutes)
@@ -410,7 +493,8 @@ def _join_discs(plan: Plan, folders: dict[str, list[str]], games_root: str, offi
     the .cue points at them); a disc in an archive is unpacked whole into that folder."""
     groups: dict[tuple[str, str, str], list[Step]] = {}
     for st in plan.steps:
-        if st.console and BY_KEY[st.console].source == "redump" and st.reason != "unknown console":
+        if st.console and BY_KEY[st.console].source == "redump" and st.reason != "unknown console" and \
+                not st.reason.startswith("new (PSN package)"):      # a PSN game has its own folder plan (psn_step)
             key = (st.source.lower(), "", st.console) if st.inner else                 (str(Path(st.source).parent).lower(), disc_base(st.source).lower(), st.console)
             groups.setdefault(key, []).append(st)
     for (_where, base, key), steps in groups.items():

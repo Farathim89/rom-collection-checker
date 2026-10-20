@@ -763,6 +763,46 @@ def test_inbox_sends_unknown_dumps_to_non_original(tmp_path):
         root / "_Non-original" / "Nintendo" / "NES" / "Translations" / "Japan"
 
 
+def test_a_pc_floppy_image_is_not_a_playstation_disc(tmp_path):
+    from app.core.inbox import is_floppy_image
+    inbox = tmp_path / "in"
+    inbox.mkdir()
+    boot = bytearray(512)
+    boot[0:3] = b"\xeb\x3c\x90"
+    boot[3:11] = b"MSDOS5.0"
+    boot[11:13] = b"\x00\x02"                    # 512 bytes per sector
+    boot[510:512] = b"\x55\xaa"
+    (inbox / "Sim City 2000 (1994) - Disk 1.img").write_bytes(bytes(boot) + bytes(1474560 - 512))
+    (inbox / "not a floppy.img").write_bytes(bytes(1474560))        # the right size, no boot sector
+    assert is_floppy_image(inbox / "Sim City 2000 (1994) - Disk 1.img")
+    assert not is_floppy_image(inbox / "not a floppy.img")
+    plan = make_plan(str(inbox), {}, {}, _store(tmp_path), hashing.Tools(), str(tmp_path / "games"))
+    by = {s.label: s for s in plan.steps}
+    st = by["Sim City 2000 (1994) - Disk 1.img"]
+    assert st.action == "leave" and "floppy" in st.reason and not st.console
+
+
+def test_a_psn_package_moves_with_its_licence(tmp_path):
+    inbox = tmp_path / "in"
+    game = inbox / "Sony" / "PlayStation 3" / "God of War II HD (Europe)"
+    game.mkdir(parents=True)
+    head = bytearray(0x60)
+    head[:4] = b"\x7fPKG"
+    head[0x30:0x54] = b"EP9000-NPEA00256_00-GODOFWARIIHDEU00"
+    (game / "PLt5gI0T.pkg").write_bytes(bytes(head) + b"rest of the package")
+    (game / "EP9000-NPEA00256_00-GODOFWARIIHDEU00.rap").write_bytes(b"licence")
+    (game / "readme.html").write_text("x")
+    (inbox / "psp.pkg").write_bytes(b"\x7fPKG" + bytes(0x2c) + b"EP0001-NPEG00001_00-0000000000000001")
+    root = tmp_path / "games"
+    plan = make_plan(str(inbox), {}, {}, _store(tmp_path), hashing.Tools(), str(root), region_folders=True)
+    by = {s.label: s for s in plan.steps}
+    st = by["PLt5gI0T.pkg"]
+    assert st.action == "move" and st.console == "ps3" and st.reason == "new (PSN package)"
+    assert Path(st.target) == root / "Sony" / "PlayStation 3" / "Europe" / "God of War II HD (Europe)"
+    assert sorted(Path(f).name for f in st.files) == ["EP9000-NPEA00256_00-GODOFWARIIHDEU00.rap", "PLt5gI0T.pkg"]
+    assert by["psp.pkg"].action == "leave"                     # a PSP package: not a PS3 game
+
+
 def test_a_game_alone_in_an_archive_is_taken_out(tmp_path):
     from app.core.inbox import apply_tidy, tidy_plan, undo
     root = tmp_path / "games"
