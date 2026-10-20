@@ -728,10 +728,11 @@ def region_moves(res, root: Path) -> list[tuple[Path, Path]]:
 
 
 # What isn't an original game leaves the console folder: <games>\_Non-original\<maker>\<console>\<kind>\ (a "_" folder:
-# not scanned as games, hidden in MediaDeck). Hacks, randomizers, homebrew ... keep their "0 - " tab in the console.
+# not scanned as games, hidden in MediaDeck). Hacks, randomizers, homebrew, prototypes ... keep their "0 - " tab in the
+# console (a sub tab in MediaDeck).
 NON_ORIGINAL = "_Non-original"
 NON_ORIGINAL_TABS = {"0 - Translations": "Translations", "0 - Unverified": "Unverified", "0 - Unlicensed": "Unlicensed",
-                     "0 - Prototypes": "Prototypes", "0 - Bad dumps": "Bad dumps"}
+                     "0 - Bad dumps": "Bad dumps"}
 PROTO = re.compile(r"\((Proto|Prototype|Beta|Alpha)\b[^)]*\)", re.I)
 UNLICENSED = re.compile(r"\((Unl|Pirate|Bootleg)\)", re.I)
 PUBLIC_DOMAIN = re.compile(r"\((PD|Homebrew|Freeware)\)", re.I)
@@ -789,7 +790,7 @@ def name_region(name: str, titles: dict[str, list[str]]) -> str:
 
 def kind_of_file(name: str, known) -> str:
     """What a file No-Intro doesn't list is: original (a release TOSEC knows), Translations, 0 - Hacks,
-    0 - Homebrew, Prototypes, Unlicensed, Bad dumps or Unverified."""
+    0 - Homebrew, 0 - Prototypes, Unlicensed, Bad dumps or Unverified."""
     k, kname = (known.kind, known.name) if known else ("", "")
     if k == "translation" or TRANSLATION.search(name) or TOSEC_TR.search(name):
         return "Translations"
@@ -798,7 +799,7 @@ def kind_of_file(name: str, known) -> str:
     if k == "homebrew" or PUBLIC_DOMAIN.search(name) or PUBLIC_DOMAIN.search(kname):
         return "0 - Homebrew"
     if PROTO.search(name) or PROTO.search(kname):
-        return "Prototypes"
+        return "0 - Prototypes"
     if UNLICENSED.search(name):
         return "Unlicensed"
     if k == "bad" or BAD.search(name):
@@ -864,6 +865,11 @@ def tidy_plan(res, root: Path, games_root: Path, entries, tools: Tools | None = 
             return None
         return parts[0] if parts[0] in NON_ORIGINAL_TABS else ""
 
+    def home_of(game: str) -> Path:
+        """Where a listed dump lives: its region folder; a prototype in the console's "0 - Prototypes" tab (a sub tab
+        in MediaDeck), where the prototypes No-Intro doesn't list go too."""
+        return root / "0 - Prototypes" if PROTO.search(game) else root / (region_folder(game) or "World")
+
     steps: list[TidyStep] = []
     labels = {it.label: it for it in res.others}
     archives: dict[str, list[str]] = {}
@@ -875,8 +881,7 @@ def tidy_plan(res, root: Path, games_root: Path, entries, tools: Tools | None = 
         tab = tab_of(p)
         if tab is None:
             continue
-        reg = (region_folder(es[0].game) or "World") if tab else ""
-        dest = (root / reg) if tab else p.parent
+        dest = home_of(es[0].game) if tab else p.parent
         if " › " in label and unpack and len(archives.get(str(p), [])) == 1:
             inner = label.split(" › ", 1)[1]
             steps.append(TidyStep(str(p), str(dest / (p.stem + Path(inner).suffix.lower())), "unpacked",
@@ -896,10 +901,7 @@ def tidy_plan(res, root: Path, games_root: Path, entries, tools: Tools | None = 
             if hit:
                 e, how, _dump = hit
                 rom = e.rom if res.console.key != "nes" else Path(e.rom).stem + ".nes"
-                if PROTO.search(e.game):
-                    dest = non_original_dir(root, games_root, "Prototypes") / rom
-                else:
-                    dest = root / (region_folder(e.game) or "World") / rom
+                dest = home_of(e.game) / rom
                 had = Path(rom).stem.lower() in have_names
                 steps.append(TidyStep(str(p), str(dest), "fixed", f"{e.game} ({how})" + (" - you have it" if had else ""),
                                       op="fix", fix_how=how, fix_size=e.size, enabled=True))
@@ -922,6 +924,28 @@ def tidy_plan(res, root: Path, games_root: Path, entries, tools: Tools | None = 
         else:
             dest = non_original_dir(root, games_root, kind, "Japan" if kind == "Translations" else "")
             steps.append(TidyStep(str(p), str(dest / p.name), kind, why))
+    # Back from this console's _Non-original (an older sort, a hand move): a clean dump - as it is, or written in its
+    # real form like a fixed dump (the old file then goes to _Duplicates) - and every prototype (0 - Prototypes)
+    nonorig = non_original_dir(root, games_root, "")
+    if nonorig.is_dir():
+        for q in sorted(nonorig.rglob("*")):
+            if not q.is_file() or q.suffix.lower().lstrip(".") not in res.console.exts or q.stat().st_size > repair.LIMIT:
+                continue
+            hit = repair.find_converted(q.read_bytes(), sizes, ix)
+            if not hit:
+                if q.relative_to(nonorig).parts[0] == "Prototypes" or PROTO.search(q.name):
+                    steps.append(TidyStep(str(q), str(root / "0 - Prototypes" / q.name), "0 - Prototypes", "prototype"))
+                continue
+            e, how, _dump = hit
+            rom = e.rom if res.console.key != "nes" else Path(e.rom).stem + ".nes"
+            had = Path(rom).stem.lower() in have_names
+            if how == "as is":
+                if not had:
+                    steps.append(TidyStep(str(q), str(home_of(e.game) / rom), "original", f"{e.game} (a clean dump)"))
+                continue
+            steps.append(TidyStep(str(q), "" if had else str(home_of(e.game) / rom), "fixed",
+                                  f"{e.game} ({how})" + (" - you have it" if had else ""),
+                                  op="fix", fix_how=how, fix_size=e.size))
     out, taken, seen = [], set(), set()
     for st in steps:
         if st.source in seen or st.source == st.target:
@@ -946,7 +970,7 @@ def tidy_plan(res, root: Path, games_root: Path, entries, tools: Tools | None = 
                     seen.add(str(q))
                     out.append(TidyStep(str(q), str(Path(st.target).with_name(Path(st.target).stem + q.suffix)),
                                         "goes with it", src.name))
-                    if SAVE_EXT.search(q.name) and st.what not in ("original", "0 - Hacks", "0 - Homebrew"):
+                    if SAVE_EXT.search(q.name) and st.what not in ("original", "0 - Hacks", "0 - Homebrew", "0 - Prototypes"):
                         st.enabled = out[-1].enabled = False     # a game being played: leaving it is your choice
                         st.why += " - a save next to it: unticked"
     return out

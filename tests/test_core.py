@@ -631,7 +631,7 @@ def test_what_a_file_no_intro_does_not_list_is():
     assert kind_of_file("Doraemon (J) [T+Eng1.1_Neokid].nes", None) == "Translations"
     assert kind_of_file("Pitfall (Hack).bin", None) == "0 - Hacks"
     assert kind_of_file("Mondo Pong (PD).bin", None) == "0 - Homebrew"
-    assert kind_of_file("Frog Pond (Proto).bin", None) == "Prototypes"
+    assert kind_of_file("Frog Pond (Proto).bin", None) == "0 - Prototypes"
     assert kind_of_file("Asteroids.bin", Known("tosec", "Asteroids", "release")) == "original"
     assert kind_of_file("treat.bin", None) == "Unverified"
     titles = {"doraemon": ["Doraemon (Japan)"]}
@@ -675,6 +675,44 @@ def test_non_originals_leave_the_console_folder(tmp_path):
     r2 = scan_console(BY_KEY["nes"], [str(nes)], store, hashing.Tools(), ScanCache(tmp_path / "c.json"), [],
                       games_root=str(root))
     assert hashing.crc(b"translated!") in r2.crcs and not any("_Non-original" in i.path for i in r2.unknown)
+
+
+PROTO_BODY = bytes(range(100, 132))
+
+
+def test_prototypes_go_to_their_tab_and_clean_dumps_come_back_from_non_original(tmp_path):
+    from app.core.inbox import tidy_plan
+    d = tmp_path / "dats"
+    d.mkdir()
+    (d / "Nintendo - Nintendo Entertainment System.dat").write_text(DAT.format(crc=f"{zlib.crc32(BODY) & 0xFFFFFFFF:08X}")
+        + f'game (\n\tname "Lost Game (USA) (Proto)"\n\trom ( name "Lost Game (USA) (Proto).nes" size 32 '
+          f'crc {zlib.crc32(PROTO_BODY) & 0xFFFFFFFF:08X} )\n)\n', encoding="utf-8")
+    store = dat.DatStore(d)
+    root = tmp_path / "games"
+    nes = root / "Nintendo" / "NES"
+    (nes / "0 - Unverified").mkdir(parents=True)
+    (nes / "0 - Prototypes").mkdir()
+    (nes / "0 - Unverified" / "lost.nes").write_bytes(b"NES\x1a" + b"\0" * 12 + PROTO_BODY)   # a listed prototype
+    (nes / "Fake (USA) (Proto).nes").write_bytes(b"an unlisted proto")
+    (nes / "0 - Prototypes" / "Kept (Japan) (Beta).nes").write_bytes(b"stays in its tab")
+    nod = root / "_Non-original" / "Nintendo" / "NES"
+    (nod / "Prototypes").mkdir(parents=True)
+    (nod / "Unverified").mkdir()
+    (nod / "Prototypes" / "Old (Japan) (Proto).nes").write_bytes(b"an old sort put it here")
+    (nod / "Unverified" / "Lost Game (USA) (Proto).nes").write_bytes(PROTO_BODY)                 # clean, as it is
+    (nod / "Unverified" / "clean.nes").write_bytes(b"NES\x1a" + b"\0" * 12 + BODY)                # clean once fixed
+    (nod / "Unverified" / "junk.nes").write_bytes(b"really unverified")
+    r = scan_console(BY_KEY["nes"], [str(nes)], store, hashing.Tools(), ScanCache(tmp_path / "c.json"), [])
+    steps = tidy_plan(r, nes, root, store.entries(BY_KEY["nes"].dat))
+    by = {Path(s.source).name: s for s in steps}
+    tab = nes / "0 - Prototypes"
+    assert Path(by["lost.nes"].target) == tab / "lost.nes"                       # listed proto out of Unverified
+    assert Path(by["Fake (USA) (Proto).nes"].target) == tab / "Fake (USA) (Proto).nes"   # not hidden any more
+    assert "Kept (Japan) (Beta).nes" not in by                                  # the tab is kept as it is
+    assert Path(by["Old (Japan) (Proto).nes"].target) == tab / "Old (Japan) (Proto).nes"
+    assert Path(by["Lost Game (USA) (Proto).nes"].target).parent == tab
+    assert by["clean.nes"].op == "fix" and Path(by["clean.nes"].target) == nes / "USA" / "Test Game (USA).nes"
+    assert "junk.nes" not in by                                                 # stays in _Non-original
 
 
 def test_inbox_sends_unknown_dumps_to_non_original(tmp_path):

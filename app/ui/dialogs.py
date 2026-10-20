@@ -705,11 +705,13 @@ class TidyDialog(QDialog):
         self.setWindowTitle(f"Non-originals - {names}")
         self.resize(1400, 780)
         v = QVBoxLayout(self)
-        note = QLabel("Translations, unverified dumps, unlicensed games and prototypes go to "
+        note = QLabel("Translations, unverified dumps and unlicensed games go to "
                       f"{root / '_Non-original'}\\<maker>\\<console> (hidden in MediaDeck; translations get a clean "
                       "name). Dumps in another form (overdumped, trimmed, byte-swapped, interleaved, reversed bits) "
-                      "become the real dump in their region folder; games alone in an archive are taken out. Old files "
-                      "and archives go to _Duplicates - nothing is deleted. Hacks, randomizers and homebrew keep their tab."
+                      "become the real dump in their region folder; games alone in an archive are taken out; clean dumps "
+                      "found in _Non-original come back. Old files and archives go to _Duplicates - nothing is deleted. "
+                      "Prototypes go to the console's 0 - Prototypes tab (shown in MediaDeck); hacks, randomizers and "
+                      "homebrew keep their tab."
                       if self.steps else "Nothing to sort: every game is an original in its place.")
         note.setWordWrap(True)
         note.setObjectName("muted")
