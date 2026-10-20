@@ -67,12 +67,15 @@ NOT_GAME = re.compile(r"\.(?:srm|sav|spc|rsp|st\d|\d{3}|state\d*|sv|cht|ips|bps|
 
 
 PSN_REGION = {"EP": "Europe", "UP": "USA", "JP": "Japan", "HP": "Asia", "KP": "Korea"}
-_PSN_ID = re.compile(r"([A-Z]{2})\d{4}-(NP[EUJHK][AB]\d{5})_\d{2}-[A-Z0-9]{16}")
+# NPxA / NPxB: PS3 games; NPxJ: PSone Classics - PS1 games sold on the PS3 store, which RPCS3 plays with the PS3's own
+# PS1 player (from the firmware) like a PS3 game
+_PSN_ID = re.compile(r"([A-Z]{2})\d{4}-(NP[EUJHK][ABJ]\d{5})_\d{2}-[A-Z0-9]{16}")
 
 
 def psn_package(p: Path) -> tuple[str, str, str] | None:
-    """A PlayStation 3 PSN download (.pkg with the PKG header and a PS3 title ID: NPEA/NPEB Europe, NPUA/NPUB USA,
-    NPJA/NPJB Japan …): (content ID, title ID, region); None for anything else (PSP / Vita packages, other files)."""
+    """A PlayStation 3 store download (.pkg with the PKG header and a PS3 title ID: NPEA/NPEB Europe, NPUA/NPUB USA,
+    NPJA/NPJB Japan …, NPxJ PSone Classics): (content ID, title ID, region); None for anything else (PSP / Vita
+    packages, other files)."""
     if p.suffix.lower() != ".pkg":
         return None
     try:
@@ -85,17 +88,6 @@ def psn_package(p: Path) -> tuple[str, str, str] | None:
     cid = h[0x30:0x54].split(b"\0")[0].decode("latin1", "replace")
     m = _PSN_ID.fullmatch(cid)
     return (cid, m.group(2), PSN_REGION.get(m.group(1), "")) if m else None
-
-
-def psone_classic(p: Path) -> str:
-    """The title ID of a PSone Classic package (NPUJ / NPEJ / NPJJ …: a PS1 game sold on the PS3 store), else ""."""
-    try:
-        with open(p, "rb") as f:
-            h = f.read(0x60)
-    except OSError:
-        return ""
-    m = re.fullmatch(r"[A-Z]{2}\d{4}-(NP[EUJHK]J\d{5})_\d{2}-[A-Z0-9]{16}", h[0x30:0x54].split(b"\0")[0].decode("latin1", "replace"))
-    return m.group(1) if h[:4] == b"\x7fPKG" and m else ""
 
 
 def psn_step(p: Path, inbox: Path, folders: dict[str, list[str]], games_root: str) -> Step:
@@ -111,7 +103,8 @@ def psn_step(p: Path, inbox: Path, folders: dict[str, list[str]], games_root: st
                              if q.is_file() and q.suffix.lower() in (".rap", ".rif", ".edat") and (cid in q.name or tid in q.name))
     dest = place(console_dest(BY_KEY["ps3"], folders, games_root), name, folder=True,
                  region=reg if REGION_FOLDERS[0] else "")
-    st = Step(str(p), console="ps3", game=name, action="move", reason="new (PSN package)", target=dest, files=files)
+    st = Step(str(p), console="ps3", game=name, action="move", target=dest, files=files,
+              reason="new (PSN package, a PS1 game)" if tid[3] == "J" else "new (PSN package)")
     if (Path(dest) / p.name).exists():
         st.action, st.reason, st.target, st.files = "leave", "you have it", "", []
     elif len(files) == 1:
@@ -296,12 +289,8 @@ def make_plan(inbox: str, folders: dict[str, list[str]], have_crcs: dict[str, se
             plan.steps.append(Step(str(p), reason="PC floppy disk (not a console game)"))
             continue
         if p.suffix.lower() == ".pkg":
-            if psn_package(p):
-                plan.steps.append(psn_step(p, Path(inbox), folders, games_root))
-            else:
-                classic = psone_classic(p)
-                plan.steps.append(Step(str(p), reason=f"PSone Classic {classic} (a PS1 game from the PS3 store - RPCS3 "
-                                                      "can't play it)" if classic else "package, not a PS3 PSN game (not checked)"))
+            plan.steps.append(psn_step(p, Path(inbox), folders, games_root) if psn_package(p)
+                              else Step(str(p), reason="package, not a PS3 store game (not checked)"))
             continue
         # images that can't match a checksum (trimmed .wbfs, .pbp, .cso …) aren't read whole: their header names them;
         # a big disc image (> 1 GB) too, when its header names it (Xbox 360 / PS2 / Wii …: seconds instead of minutes)
@@ -494,7 +483,7 @@ def _join_discs(plan: Plan, folders: dict[str, list[str]], games_root: str, offi
     groups: dict[tuple[str, str, str], list[Step]] = {}
     for st in plan.steps:
         if st.console and BY_KEY[st.console].source == "redump" and st.reason != "unknown console" and \
-                not st.reason.startswith("new (PSN package)"):      # a PSN game has its own folder plan (psn_step)
+                not st.reason.startswith("new (PSN package"):       # a PSN game has its own folder plan (psn_step)
             key = (st.source.lower(), "", st.console) if st.inner else                 (str(Path(st.source).parent).lower(), disc_base(st.source).lower(), st.console)
             groups.setdefault(key, []).append(st)
     for (_where, base, key), steps in groups.items():

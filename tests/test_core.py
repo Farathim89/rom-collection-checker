@@ -801,6 +801,14 @@ def test_a_psn_package_moves_with_its_licence(tmp_path):
     assert Path(st.target) == root / "Sony" / "PlayStation 3" / "Europe" / "God of War II HD (Europe)"
     assert sorted(Path(f).name for f in st.files) == ["EP9000-NPEA00256_00-GODOFWARIIHDEU00.rap", "PLt5gI0T.pkg"]
     assert by["psp.pkg"].action == "leave"                     # a PSP package: not a PS3 game
+    # a PSone Classic (NPxJ): a PS1 game from the PS3 store - RPCS3 plays it, so it is sorted like a PS3 PSN game
+    classic = inbox / "Sony" / "PlayStation 3" / "Atelier Marie (Japan)"
+    classic.mkdir()
+    head[0x30:0x54] = b"JP0103-NPJJ00121_00-0000000000000001"
+    (classic / "x.pkg").write_bytes(bytes(head))
+    plan = make_plan(str(inbox), {}, {}, _store(tmp_path), hashing.Tools(), str(root), region_folders=True)
+    st = {s.label: s for s in plan.steps}["x.pkg"]
+    assert st.action == "move" and "PS1" in st.reason and Path(st.target) == root / "Sony" / "PlayStation 3" / "Japan" / "Atelier Marie (Japan)"
 
 
 def test_a_game_alone_in_an_archive_is_taken_out(tmp_path):
