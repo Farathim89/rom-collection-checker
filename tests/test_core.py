@@ -716,6 +716,39 @@ def test_prototypes_go_to_their_tab_and_clean_dumps_come_back_from_non_original(
     assert "junk.nes" not in by                                                 # stays in _Non-original
 
 
+def test_a_changed_dump_of_a_real_game_stays_in_the_collection(tmp_path):
+    from app.core.inbox import apply_tidy, tidy_plan
+    store = _store(tmp_path)
+    root = tmp_path / "games"
+    nes = root / "Nintendo" / "NES"
+    (nes / "Europe").mkdir(parents=True)
+    nod = root / "_Non-original" / "Nintendo" / "NES" / "Unverified"
+    nod.mkdir(parents=True)
+    changed = bytes(31) + b"\x01"                                    # Test Game's size, other content (a patch)
+    (nod / "Test Game (USA).nes").write_bytes(changed)               # parked by an older sort: comes back
+    (nes / "Europe" / "Other Name.nes").write_bytes(b"really unknown")  # no game of that title: still goes out
+    (nod / "Test Game (USA) (Hack).nes").write_bytes(changed)        # a hack stays out
+    r = scan_console(BY_KEY["nes"], [str(nes)], store, hashing.Tools(), ScanCache(tmp_path / "c.json"), [],
+                     games_root=str(root))
+    by = {Path(s.source).name: s for s in tidy_plan(r, nes, root, store.entries(BY_KEY["nes"].dat))}
+    assert by["Test Game (USA).nes"].what == "modified" and \
+        Path(by["Test Game (USA).nes"].target) == nes / "USA" / "Test Game (USA).nes"
+    assert Path(by["Other Name.nes"].target).parent == root / "_Non-original" / "Nintendo" / "NES" / "Unverified"
+    assert "Test Game (USA) (Hack).nes" not in by
+    # with the clean dump in the collection the changed copy goes to _Duplicates\_Modified copies instead
+    (nes / "USA").mkdir()
+    (nes / "USA" / "Test Game (USA).nes").write_bytes(BODY)
+    r = scan_console(BY_KEY["nes"], [str(nes)], store, hashing.Tools(), ScanCache(tmp_path / "c2.json"), [],
+                     games_root=str(root))
+    steps = tidy_plan(r, nes, root, store.entries(BY_KEY["nes"].dat))
+    by = {Path(s.source).name: s for s in steps}
+    assert by["Test Game (USA).nes"].op == "park" and by["Test Game (USA).nes"].enabled
+    n, problems, _log = apply_tidy([by["Test Game (USA).nes"]], root, hashing.Tools(), tmp_path / "undo")
+    assert n == 1 and not problems
+    assert (root / "_Duplicates" / "_Modified copies" / "_Non-original" / "Nintendo" / "NES" / "Unverified" /
+            "Test Game (USA).nes").is_file()
+
+
 def test_inbox_sends_unknown_dumps_to_non_original(tmp_path):
     inbox = tmp_path / "in"
     inbox.mkdir()

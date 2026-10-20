@@ -746,7 +746,52 @@ GOOD_LANG = {"eng": "en", "fre": "fr", "fra": "fr", "spa": "es", "esp": "es", "p
              "dan": "da", "fin": "fi", "gre": "el", "heb": "he", "cat": "ca"}
 UNPACKED = "_Unpacked archives"        # <games>\_Duplicates\_Unpacked archives\...: archives whose game was taken out
 REPAIRED = "_Repaired originals"       # <games>\_Duplicates\_Repaired originals\...: old forms of fixed dumps
+MODIFIED_COPIES = "_Modified copies"   # <games>\_Duplicates\_Modified copies\...: a changed copy of a game you have clean
 SAVE_EXT = re.compile(r"\.(sav|srm|bs\d|eep|fla|sra|mpk|ngf|st\d|state\d*|\d{3})$", re.I)
+
+
+def header_serial(p: Path, console: str) -> str:
+    """The game's ID in a cartridge's own header, written as No-Intro lists it (GBA "AXVE", DS "CPUE", N64 "NZLP");
+    "" when this console's header has none we read."""
+    if console == "gba" and p.suffix.lower() == ".gba":
+        try:
+            with open(p, "rb") as f:
+                f.seek(0xAC)
+                code = f.read(4).decode("latin1")
+        except OSError:
+            return ""
+        return code if re.fullmatch(r"[A-Z0-9]{4}", code) else ""
+    if console in ("nds", "n64"):
+        pr = probe(p, console)
+        return pr.serial if pr else ""
+    return ""
+
+
+def real_game_of(p: Path, console: str, by_title: dict) -> Entry | None:
+    """A changed, trimmed or patched dump of a real game (the user's rule: a real game stays in the collection): its
+    title is a No-Intro game's AND its header names that game (the serial) - for a console without a header serial
+    the size fits instead (the same, or trimmed: smaller but at least half). Hacks under a game's name fail the test
+    (another header) unless they kept everything; translations, hacks, pirates ... are sorted out before this."""
+    cands = by_title.get(norm_title(p.name), [])
+    if not cands:
+        return None
+    serial = header_serial(p, console)
+    if serial:
+        hits = [e for e in cands if e.serial and e.serial.upper() == serial.upper()]
+    else:
+        try:
+            n = p.stat().st_size
+        except OSError:
+            return None
+        hits = [e for e in cands if e.size == n] or [e for e in cands if e.size // 2 <= n < e.size]
+    if not hits:
+        return None
+    # several versions fit (the lists give some Europe releases the USA serial): the one the file is named after,
+    # else one sharing a region with the file name's "(USA)" / "(USA, Europe)" / GoodTools "(U)"
+    stem = re.sub(r"\.[A-Za-z0-9]{1,5}$", "", p.name)
+    mine = {r.strip() for g in re.findall(r"\(([^)]+)\)", stem) for r in g.split(",")}
+    mine |= {GOOD_REGION[r] for r in list(mine) if r in GOOD_REGION}
+    return min(hits, key=lambda e: (e.game.lower() != stem.lower(), not (mine & set(e.regions))))
 
 
 @dataclass
@@ -870,6 +915,24 @@ def tidy_plan(res, root: Path, games_root: Path, entries, tools: Tools | None = 
         in MediaDeck), where the prototypes No-Intro doesn't list go too."""
         return root / "0 - Prototypes" if PROTO.search(game) else root / (region_folder(game) or "World")
 
+    # The user's rule: a changed / trimmed / patched dump of a real game stays in the collection (its region folder) -
+    # unless you have that game as a clean dump: then the changed copy goes to _Duplicates\_Modified copies
+    by_title: dict[str, list] = {}
+    for e in entries:
+        if e.kind in ("game", "rerelease", "demo"):
+            by_title.setdefault(norm_title(e.game), []).append(e)
+    # "you have it clean": that title in that region (any revision) - another region's release is another game here
+    owned = {(norm_title(g), region_folder(g)) for t in res.titles.values() for g, fs in t.have.items() if fs}
+
+    def modified_step(p: Path, real) -> None:
+        if (norm_title(real.game), region_folder(real.game)) in owned:
+            st = TidyStep(str(p), "", "modified copy", f"{real.game}: you have it as a clean dump", op="park")
+            if any(SAVE_EXT.search(q.name) and q.stem.lower() == p.stem.lower() for q in p.parent.iterdir()):
+                st.enabled, st.why = False, st.why + " - a save next to it: unticked"
+            steps.append(st)
+        elif p.parent != home_of(real.game):
+            steps.append(TidyStep(str(p), str(home_of(real.game) / p.name), "modified", f"{real.game} (a changed dump)"))
+
     steps: list[TidyStep] = []
     labels = {it.label: it for it in res.others}
     archives: dict[str, list[str]] = {}
@@ -908,6 +971,11 @@ def tidy_plan(res, root: Path, games_root: Path, entries, tools: Tools | None = 
                 if had:
                     steps[-1].target = ""        # only the old file goes (to _Duplicates)
                 continue
+        if kind == "Unverified" and not it.inner:
+            real = real_game_of(p, res.console.key, by_title)
+            if real:
+                modified_step(p, real)           # a real game: stays (or goes to its region folder)
+                continue
         why = kind.removeprefix("0 - ").lower() + (f" ({k.source}: {k.name})" if k else "")
         if kind == "original":
             reg = name_region(k.name if k else p.name, titles) or name_region(p.name, titles)
@@ -941,6 +1009,10 @@ def tidy_plan(res, root: Path, games_root: Path, entries, tools: Tools | None = 
         if not hit:
             if first == "Prototypes" or PROTO.search(q.name):
                 steps.append(TidyStep(str(q), str(root / "0 - Prototypes" / q.name), "0 - Prototypes", "prototype"))
+            elif first == "Unverified" and kind_of_file(q.name, None) == "Unverified" and q.is_file():
+                real = real_game_of(q, res.console.key, by_title)
+                if real:
+                    modified_step(q, real)       # a changed dump of a real game comes back into the collection
             continue
         e, how, _dump = hit
         rom = e.rom if res.console.key != "nes" else Path(e.rom).stem + ".nes"
@@ -976,7 +1048,7 @@ def tidy_plan(res, root: Path, games_root: Path, entries, tools: Tools | None = 
                     seen.add(str(q))
                     out.append(TidyStep(str(q), str(Path(st.target).with_name(Path(st.target).stem + q.suffix)),
                                         "goes with it", src.name))
-                    if SAVE_EXT.search(q.name) and st.what not in ("original", "0 - Hacks", "0 - Homebrew", "0 - Prototypes"):
+                    if SAVE_EXT.search(q.name) and st.what not in ("original", "modified", "0 - Hacks", "0 - Homebrew", "0 - Prototypes"):
                         st.enabled = out[-1].enabled = False     # a game being played: leaving it is your choice
                         st.why += " - a save next to it: unticked"
     return out
@@ -1027,6 +1099,8 @@ def apply_tidy(steps: list[TidyStep], games_root: Path, tools: Tools, undo_dir: 
                         f.write(dump)
                     done.append({"op": "created", "path": str(dst)})
                 park(src, REPAIRED)
+            elif st.op == "park":                       # a changed copy of a game you have clean
+                park(src, MODIFIED_COPIES)
             elif st.op == "unpack":
                 with tempfile.TemporaryDirectory(prefix="romtidy-", dir=src.parent) as tmp:
                     if not tools.extract_all(src, Path(tmp)):
