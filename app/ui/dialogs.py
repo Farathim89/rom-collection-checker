@@ -470,6 +470,7 @@ class SortDialog(QDialog):
             dl = []
         have = {k: r.crcs for k, r in m.results.items()}
         have_games = {k: {g for t in r.titles.values() for g in t.have} for k, r in m.results.items()}
+        have_files = {k: {g: fs for t in r.titles.values() for g, fs in t.have.items()} for k, r in m.results.items()}
         folders = m.folders()
         tools = Tools(s.sevenzip, s.winrar_dir, s.dolphin_tool)
 
@@ -480,7 +481,8 @@ class SortDialog(QDialog):
                     m.dats.download(BY_KEY[k].dat)
                 except Exception:  # noqa: BLE001 - a console without a list is recognised by file type only
                     pass
-            return make_plan(inbox, folders, have, m.dats, tools, s.games_root, have_games=have_games, unpack=s.unpack,
+            return make_plan(inbox, folders, have, m.dats, tools, s.games_root, have_games=have_games, have_files=have_files,
+                             unpack=s.unpack,
                              official_names=s.official_names, take_hacks=s.take_hacks, take_unknown_dumps=s.take_unknown,
                              region_folders=s.region_folders, take_demos=s.take_demos,
                              progress=w.signals.progress.emit, stop=lambda: w.stop)

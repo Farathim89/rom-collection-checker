@@ -65,8 +65,9 @@ def find(data: bytes, name: str, sizes: list[int], index: dict) -> tuple[object,
             continue
         if size < len(data):
             tail = set(data[size:])
-            if not tail <= {0x00, 0xFF} or len(tail) != 1:
-                continue                  # only padding may be cut off
+            mirrored = len(data) % size == 0 and data == data[:size] * (len(data) // size)
+            if not mirrored and (not tail <= {0x00, 0xFF} or len(tail) != 1):
+                continue                  # only padding may be cut off - or the game itself stored again (mirrored)
             tries = [b""]
         else:
             tries = list(_PADS)

@@ -866,3 +866,84 @@ def test_each_disc_of_a_game_gets_its_cue(tmp_path):
                                          encoding="utf-8")
     assert [p.name for p in ensure_cue(g)] == ["RE2 (Disc 2).cue"]     # Disc 1's sheet doesn't stop Disc 2's
     assert ensure_cue(g) == []
+
+
+def test_a_mirrored_overdump_is_cut_back(tmp_path):
+    from app.core.inbox import apply_plan
+    rom = bytes(range(256)) * 4096                                  # 1 MB, the listed dump
+    d = tmp_path / "dats"
+    d.mkdir()
+    (d / "Nintendo - Game Boy Advance.dat").write_text(
+        'clrmamepro (\n\tname "Nintendo - Game Boy Advance"\n)\n\ngame (\n\tname "Mirror Test (USA, Europe)"\n'
+        f'\trom ( name "Mirror Test (USA, Europe).gba" size {len(rom)} crc {zlib.crc32(rom) & 0xFFFFFFFF:08X} )\n)\n',
+        encoding="utf-8")
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    (inbox / "Mirror Test (USA, Europe).gba").write_bytes(rom * 4)    # the game stored 4 times (Classic NES Series)
+    gba = tmp_path / "games" / "Nintendo" / "GameBoy Advance"
+    gba.mkdir(parents=True)
+    plan = make_plan(str(inbox), {"gba": [str(gba)]}, {}, dat.DatStore(d), hashing.Tools(), str(tmp_path / "games"))
+    assert plan.steps[0].action == "move" and plan.steps[0].fix_size == len(rom), plan.steps[0].reason
+    _n, problems, _log = apply_plan(plan, hashing.Tools(), tmp_path / "undo")
+    assert not problems and (gba / "Mirror Test (USA, Europe).gba").read_bytes() == rom
+
+
+def test_a_clean_dump_replaces_your_changed_copy(tmp_path):
+    from app.core.inbox import HAD, apply_plan
+    root = tmp_path / "games"
+    nes = root / "Nintendo" / "NES"
+    (nes / "USA").mkdir(parents=True)
+    changed = nes / "USA" / "Test Game (USA).nes"
+    changed.write_bytes(bytes(31) + b"\x01")                         # your copy: the game, changed (kept as a real game)
+    (nes / "USA" / "Test Game (USA) (patched).nes").write_bytes(bytes(30) + b"\x01\x01")
+    inbox = tmp_path / "in"
+    inbox.mkdir()
+    (inbox / "tg.nes").write_bytes(BODY)                               # the clean dump
+    (inbox / "123 - Test Game (U)(Group).nes").write_bytes(b"a scene dump")   # another dump of it, same sort
+    have_files = {"nes": {"Test Game (USA)": [str(changed), str(nes / "USA" / "Test Game (USA) (patched).nes")]}}
+    plan = make_plan(str(inbox), {"nes": [str(nes)]}, {"nes": {"deadbeef"}}, _store(tmp_path), hashing.Tools(),
+                     str(root), have_games={"nes": {"Test Game (USA)"}}, have_files=have_files, region_folders=True)
+    by = {s.label: s for s in plan.steps}
+    assert by["tg.nes"].action == "move" and len(by["tg.nes"].replaces) == 2, by["tg.nes"].reason
+    assert by["123 - Test Game (U)(Group).nes"].reason in HAD           # you'll have it clean: a leftover
+    _n, problems, _log = apply_plan(plan, hashing.Tools(), tmp_path / "undo")
+    assert not problems and changed.read_bytes() == BODY
+    mod = root / "_Duplicates" / "_Modified copies" / "Nintendo" / "NES" / "USA"
+    assert (mod / "Test Game (USA).nes").read_bytes() == bytes(31) + b"\x01"
+    assert (mod / "Test Game (USA) (patched).nes").is_file()
+    # with the clean dump there, the same file is simply "you have it"
+    (inbox / "tg.nes").write_bytes(BODY)
+    plan = make_plan(str(inbox), {"nes": [str(nes)]}, {"nes": set(hashing.variants(BODY))}, _store(tmp_path),
+                     hashing.Tools(), str(root), have_games={"nes": {"Test Game (USA)"}}, have_files=have_files)
+    assert {s.label: s for s in plan.steps}["tg.nes"].reason == "you have it"
+    # a quick check names your copy by its header only (no checksum): read, it is the clean dump - you have it
+    plan = make_plan(str(inbox), {"nes": [str(nes)]}, {"nes": set()}, _store(tmp_path), hashing.Tools(), str(root),
+                     have_games={"nes": {"Test Game (USA)"}}, have_files={"nes": {"Test Game (USA)": [str(changed)]}})
+    assert {s.label: s for s in plan.steps}["tg.nes"].reason == "you have it"
+
+
+def test_an_overdump_of_a_real_game_in_non_original_is_cut_back(tmp_path):
+    from app.core.inbox import apply_tidy, tidy_plan
+    rom = bytearray(bytes(range(256)) * 4096)
+    rom[0xAC:0xB0] = b"MIRE"                                          # the game's ID in its header
+    rom = bytes(rom)
+    d = tmp_path / "dats"
+    d.mkdir()
+    (d / "Nintendo - Game Boy Advance.dat").write_text(
+        'clrmamepro (\n\tname "Nintendo - Game Boy Advance"\n)\n\ngame (\n\tname "Mirror Test (USA, Europe)"\n'
+        '\tserial "MIRE"\n'
+        f'\trom ( name "Mirror Test (USA, Europe).gba" size {len(rom)} crc {zlib.crc32(rom) & 0xFFFFFFFF:08X} )\n)\n',
+        encoding="utf-8")
+    store = dat.DatStore(d)
+    root = tmp_path / "games"
+    gba = root / "Nintendo" / "GameBoy Advance"
+    gba.mkdir(parents=True)
+    nod = root / "_Non-original" / "Nintendo" / "GameBoy Advance" / "Unverified"
+    nod.mkdir(parents=True)
+    (nod / "Mirror Test (USA, Europe).gba").write_bytes(rom * 4)          # parked by an older sort
+    r = scan_console(BY_KEY["gba"], [str(gba)], store, hashing.Tools(), ScanCache(tmp_path / "c.json"), [],
+                     games_root=str(root))
+    steps = tidy_plan(r, gba, root, store.entries(BY_KEY["gba"].dat))
+    assert len(steps) == 1 and steps[0].op == "fix", [(s.op, s.what, s.why) for s in steps]
+    n, problems, _log = apply_tidy(steps, root, hashing.Tools(), tmp_path / "undo")
+    assert not problems and Path(steps[0].target).read_bytes() == rom

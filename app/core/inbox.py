@@ -229,6 +229,7 @@ class Step:
     fix_size: int = 0           # a trimmed dump / an overdump: padded or cut to this size it is the listed dump
     fix_pad: str = ""           # the padding byte added ("ff" / "00"), "" = its padding cut off
     fix_crc: str = ""           # the listed dump's checksum (checked again after the fix)
+    replaces: list = field(default_factory=list)   # [(a changed copy of this game in your folder, where it goes)]
 
     @property
     def label(self) -> str:
@@ -247,13 +248,38 @@ class Plan:
         return out
 
 
+def changed_copies(files: list[str], games_root: str, clean: set[str], tools: Tools, exts: set[str]) -> list[tuple[str, str]]:
+    """Your files of a game whose clean dump (checksums `clean`) comes in: where each goes - <games>\\_Duplicates\\
+    _Modified copies\\<same path> (the user's rule: keep only the clean one). Each file is read: only one whose
+    checksum is known and isn't the clean dump's counts (a quick check names cartridges by their header, without a
+    checksum); [] when one of them is the clean dump or one can't be read - then you have it."""
+    root = Path(games_root)
+    out = []
+    for f in dict.fromkeys(f.split(" › ")[0] for f in files):
+        try:
+            rel = Path(f).relative_to(root)
+        except ValueError:
+            continue
+        if not rel.parts or rel.parts[0] == "_Duplicates" or not Path(f).is_file():
+            continue
+        items, err = file_items(Path(f), tools, exts, NO_CHECKSUM)
+        crcs = {c.lower() for it in items for c in it.crcs}
+        if err or not crcs or crcs & clean:
+            return []
+        out.append((f, str(root / "_Duplicates" / MODIFIED_COPIES / rel)))
+    return out
+
+
 def make_plan(inbox: str, folders: dict[str, list[str]], have_crcs: dict[str, set[str]], dats: DatStore,
-              tools: Tools, games_root: str, *, have_games: dict[str, set[str]] | None = None, unpack=True,
+              tools: Tools, games_root: str, *, have_games: dict[str, set[str]] | None = None,
+              have_files: dict[str, dict[str, list[str]]] | None = None, unpack=True,
               official_names=True, take_hacks=False,
               take_unknown_dumps=True, region_folders=False, take_demos=True, progress=lambda t: None,
               stop=lambda: False) -> Plan:
-    """have_crcs: console key -> every CRC variant of the games you already have. region_folders: games go into
-    <console>/<region>/ (Japan, Germany …; World when released in several)."""
+    """have_crcs: console key -> every CRC variant of the games you already have. have_games: console -> the games
+    you have (also as a changed copy), have_files: console -> game -> your files of it - a clean dump of a game you
+    only have changed comes in and the changed copy goes to _Duplicates\\_Modified copies. region_folders: games go
+    into <console>/<region>/ (Japan, Germany …; World when released in several)."""
     REGION_FOLDERS[0] = region_folders
     plan = Plan(inbox)
     _DATS_FOR_BIG[:] = [dats]
@@ -366,9 +392,15 @@ def make_plan(inbox: str, folders: dict[str, list[str]], have_crcs: dict[str, se
             if not take_demos and (kind_of(st.game, "") == "demo" if st.game else bool(DEMO_TAG.search(name))):
                 st.reason = "demo (left out)"     # Settings → Sorting: demos, kiosk and magazine discs stay in the inbox
                 continue
-            if any(x in have_crcs.get(st.console, set()) for x in it.crcs) or                    (st.game and not st.by_name and st.game in (have_games or {}).get(st.console, ())):
-                st.reason = "you have it"      # by checksum, or the same game named by its header in your folder
-                continue
+            had_crc = any(x in have_crcs.get(st.console, set()) for x in it.crcs)
+            if had_crc or (st.game and not st.by_name and st.game in (have_games or {}).get(st.console, ())):
+                # a listed dump (by its checksum) of a game you only have changed: it comes in, yours goes
+                if not had_crc and (hit or st.fix_size) and not st.by_header:
+                    st.replaces = changed_copies((have_files or {}).get(st.console, {}).get(st.game, []), games_root,
+                                                 {x.lower() for x in it.crcs}, tools, all_exts - set(ARCHIVES))
+                if not st.replaces:
+                    st.reason = "you have it"  # by checksum, or the same game named by its header in your folder
+                    continue
             if st.by_name and st.game in (have_games or {}).get(st.console, ()):
                 st.reason = "you have it (by name)"   # the same game is in your folder; only the name says so
                 continue
@@ -376,7 +408,7 @@ def make_plan(inbox: str, folders: dict[str, list[str]], have_crcs: dict[str, se
             if not first and st.game and (st.by_name or st.by_header):    # a disc named twice (.wbfs and its .7z)
                 first = seen_games.get((st.console, st.game))
             if first:
-                st.reason = "same as another file here"
+                st.reason, st.replaces = "same as another file here", []
                 continue
             for x in it.crcs:
                 seen[(st.console, x)] = st.label
@@ -401,6 +433,8 @@ def make_plan(inbox: str, folders: dict[str, list[str]], have_crcs: dict[str, se
                                                                   else "new (overdump, padding cut off)")
                                             if st.fix_size else "new") if st.game else (
                 "translation" if TRANSLATION.search(name) else not_in)
+            if st.replaces:
+                st.reason = "clean dump - your changed copy goes to _Modified copies"
             dest = console_dest(c, folders, games_root)
             if not st.game:      # a dump the list doesn't know: not among the verified games (see NON_ORIGINAL)
                 if HACK.search(name) and not TRANSLATION.search(name):
@@ -419,6 +453,12 @@ def make_plan(inbox: str, folders: dict[str, list[str]], have_crcs: dict[str, se
                 base = st.game
             st.target = place(dest, SAFE.sub("_", base) + ext.lower(), region=region_of_step(st.game),
                               own=c.source == "redump" and not (it.inner and not st.unpack))
+    # a dump the list doesn't know, of a game whose clean dump comes in with this sort: you'll have it clean
+    coming = {(s.console, norm_title(s.game)) for s in plan.steps if s.action == "move" and s.game}
+    for s in plan.steps:
+        if s.action == "move" and not s.game and s.target and "Unverified" in Path(s.target).parts and \
+                (s.console, norm_title(Path(s.inner or s.source).name)) in coming:
+            s.action, s.target, s.reason = "leave", "", "other dump of a game you have"
     _join_discs(plan, folders, games_root, official_names)
     return plan
 
@@ -535,82 +575,109 @@ def apply_plan(plan: Plan, tools: Tools, undo_dir: Path, progress=lambda t: None
     work = tempfile.TemporaryDirectory(prefix="romsort-")
     todo = [s for s in plan.steps if s.enabled and s.action == "move"]
     for n, s in enumerate(todo, 1):
-        progress(f"Moving {n} / {len(todo)}: {s.label}")
-        t = Path(s.target)
-        into_folder = bool(s.files) or (s.inner and s.unpack_all)    # the discs of a game share their folder
-        if not into_folder and (t.exists() or str(t).lower() in targets):
-            problems.append(f"already there, left in the inbox: {t}")
-            continue
+        parked = _park(s.replaces, done, problems) if s.replaces else []   # the changed copy: out of its way
         try:
-            t.parent.mkdir(parents=True, exist_ok=True)
-            if s.files:                      # a disc of several files: all of them into its folder
-                if any((t / Path(f).name).exists() for f in s.files):
-                    problems.append(f"already there, left in the inbox: {t / Path(s.files[0]).name}")
-                    continue
-                t.mkdir(parents=True, exist_ok=True)
-                for f in s.files:
-                    if Path(f).exists():
-                        shutil.move(f, t / Path(f).name)
-                        done.append({"op": "moved", "from": f, "to": str(t / Path(f).name)})
-                done += [{"op": "created", "path": str(c)} for c in cue.ensure_cue(t)]   # CloneCD: its .cue
-                s.done = True
+            progress(f"Moving {n} / {len(todo)}: {s.label}")
+            t = Path(s.target)
+            into_folder = bool(s.files) or (s.inner and s.unpack_all)    # the discs of a game share their folder
+            if not into_folder and (t.exists() or str(t).lower() in targets):
+                problems.append(f"already there, left in the inbox: {t}")
                 continue
-            if s.inner and s.unpack_all:     # a disc in an archive: everything in it into its folder
-                tmp = Path(work.name) / f"all{n}"
-                tmp.mkdir()
-                progress(f"Moving {n} / {len(todo)}: unpacking {Path(s.source).name}…")
-                if not tools.extract_all(Path(s.source), tmp):
-                    problems.append(f"could not unpack: {s.source}")
+            try:
+                t.parent.mkdir(parents=True, exist_ok=True)
+                if s.files:                      # a disc of several files: all of them into its folder
+                    if any((t / Path(f).name).exists() for f in s.files):
+                        problems.append(f"already there, left in the inbox: {t / Path(s.files[0]).name}")
+                        continue
+                    t.mkdir(parents=True, exist_ok=True)
+                    for f in s.files:
+                        if Path(f).exists():
+                            shutil.move(f, t / Path(f).name)
+                            done.append({"op": "moved", "from": f, "to": str(t / Path(f).name)})
+                    done += [{"op": "created", "path": str(c)} for c in cue.ensure_cue(t)]   # CloneCD: its .cue
+                    s.done = True
                     continue
-                got = sorted(q for q in tmp.rglob("*") if q.is_file())
-                if any((t / q.name).exists() for q in got):
-                    problems.append(f"already there, left in the inbox: {s.label}")
-                    continue
-                t.mkdir(parents=True, exist_ok=True)
-                for q in got:                # (never over a file that is there)
-                    shutil.move(str(q), t / q.name)
-                    done.append({"op": "created", "path": str(t / q.name)})
-                done += [{"op": "created", "path": str(c)} for c in cue.ensure_cue(t)]   # CloneCD: its .cue
-                s.done = True
-                continue
-            if s.inner and s.unpack:
-                if s.source not in unpacked:
-                    tmp = Path(work.name) / str(len(unpacked))
+                if s.inner and s.unpack_all:     # a disc in an archive: everything in it into its folder
+                    tmp = Path(work.name) / f"all{n}"
                     tmp.mkdir()
                     progress(f"Moving {n} / {len(todo)}: unpacking {Path(s.source).name}…")
-                    unpacked[s.source] = tmp if tools.extract_all(Path(s.source), tmp) else None
-                tmp = unpacked[s.source]
-                if tmp is None:
-                    problems.append(f"could not unpack: {s.source}")
-                    continue
-                got = tmp / s.inner
-                if not got.is_file():
-                    got = next(tmp.rglob(Path(s.inner).name), got)
-                if not got.is_file():
-                    problems.append(f"{s.inner} not found in {s.source}")
-                    continue
-                shutil.copy2(got, t)
-                done.append({"op": "created", "path": str(t)})
-                if s.fix_size and not _fix(s, t, problems, done):
-                    continue
-                s.done = True
-            else:
-                if not Path(s.source).exists():
-                    continue   # an archive with several games already moved by an earlier step
-                if s.fix_size:                   # fixed: a copy; the original goes to _Duplicates with the tidy
-                    shutil.copy2(s.source, t)
-                    done.append({"op": "created", "path": str(t)})
-                    if not _fix(s, t, problems, done):
+                    if not tools.extract_all(Path(s.source), tmp):
+                        problems.append(f"could not unpack: {s.source}")
                         continue
+                    got = sorted(q for q in tmp.rglob("*") if q.is_file())
+                    if any((t / q.name).exists() for q in got):
+                        problems.append(f"already there, left in the inbox: {s.label}")
+                        continue
+                    t.mkdir(parents=True, exist_ok=True)
+                    for q in got:                # (never over a file that is there)
+                        shutil.move(str(q), t / q.name)
+                        done.append({"op": "created", "path": str(t / q.name)})
+                    done += [{"op": "created", "path": str(c)} for c in cue.ensure_cue(t)]   # CloneCD: its .cue
+                    s.done = True
+                    continue
+                if s.inner and s.unpack:
+                    if s.source not in unpacked:
+                        tmp = Path(work.name) / str(len(unpacked))
+                        tmp.mkdir()
+                        progress(f"Moving {n} / {len(todo)}: unpacking {Path(s.source).name}…")
+                        unpacked[s.source] = tmp if tools.extract_all(Path(s.source), tmp) else None
+                    tmp = unpacked[s.source]
+                    if tmp is None:
+                        problems.append(f"could not unpack: {s.source}")
+                        continue
+                    got = tmp / s.inner
+                    if not got.is_file():
+                        got = next(tmp.rglob(Path(s.inner).name), got)
+                    if not got.is_file():
+                        problems.append(f"{s.inner} not found in {s.source}")
+                        continue
+                    shutil.copy2(got, t)
+                    done.append({"op": "created", "path": str(t)})
+                    if s.fix_size and not _fix(s, t, problems, done):
+                        continue
+                    s.done = True
                 else:
-                    shutil.move(s.source, t)
-                    done.append({"op": "moved", "from": s.source, "to": str(t)})
-                s.done = True
-            targets.add(str(t).lower())
-        except OSError as e:
-            problems.append(f"{s.label}: {e}")
+                    if not Path(s.source).exists():
+                        continue   # an archive with several games already moved by an earlier step
+                    if s.fix_size:                   # fixed: a copy; the original goes to _Duplicates with the tidy
+                        shutil.copy2(s.source, t)
+                        done.append({"op": "created", "path": str(t)})
+                        if not _fix(s, t, problems, done):
+                            continue
+                    else:
+                        shutil.move(s.source, t)
+                        done.append({"op": "moved", "from": s.source, "to": str(t)})
+                    s.done = True
+                targets.add(str(t).lower())
+            except OSError as e:
+                problems.append(f"{s.label}: {e}")
+        finally:
+            if parked and not s.done:                 # not placed after all: the changed copy comes back
+                _park([(b, a) for a, b in parked], done, problems)
     work.cleanup()
     return len(done), problems, write_undo(undo_dir, "sort", done)
+
+
+def _park(pairs, done: list[dict], problems: list[str]) -> list[tuple[str, str]]:
+    """Moves each (file, to) - never over a file (\"name (2)\" then); logged for Undo. Returns what moved."""
+    moved = []
+    for a, b in pairs:
+        a, b = Path(a), Path(b)
+        if not a.is_file():
+            continue
+        q, k = b, 2
+        while q.exists():
+            q = b.with_name(f"{b.stem} ({k}){b.suffix}")
+            k += 1
+        try:
+            q.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(a), str(q))
+        except OSError as e:
+            problems.append(f"{a}: {e}")
+            continue
+        done.append({"op": "moved", "from": str(a), "to": str(q)})
+        moved.append((str(a), str(q)))
+    return moved
 
 
 def _fix(s: Step, t: Path, problems: list[str], done: list[dict]) -> bool:
@@ -623,7 +690,7 @@ def _fix(s: Step, t: Path, problems: list[str], done: list[dict]) -> bool:
     return False
 
 
-HAD = ("you have it", "same as another file here")
+HAD = ("you have it", "same as another file here", "other dump of a game you have")
 
 
 def leftovers(plan: Plan, games_root: str) -> list[tuple[Path, Path]]:
@@ -1079,13 +1146,17 @@ def tidy_plan(res, root: Path, games_root: Path, entries, tools: Tools | None = 
         hit = None
         if crcs & ix.keys() and q.is_file() and q.stat().st_size <= repair.LIMIT:
             hit = repair.find_converted(q.read_bytes(), sizes, ix)
+        real = None
+        if not hit and first == "Unverified" and kind_of_file(q.name, None) == "Unverified" and q.is_file():
+            real = real_game_of(q, res.console.key, by_title)
+            if real and q.stat().st_size <= repair.LIMIT:      # a real game's file: maybe a listed dump once converted
+                hit = repair.find_converted(q.read_bytes(), [e.size for e in by_title.get(norm_title(q.name), [])
+                                                             if e.size], ix)     # (an overdump: the game stored 4 times)
         if not hit:
             if first == "Prototypes" or PROTO.search(q.name):
                 steps.append(TidyStep(str(q), str(root / "0 - Prototypes" / q.name), "0 - Prototypes", "prototype"))
-            elif first == "Unverified" and kind_of_file(q.name, None) == "Unverified" and q.is_file():
-                real = real_game_of(q, res.console.key, by_title)
-                if real:
-                    modified_step(q, real)       # a changed dump of a real game comes back into the collection
+            elif real:
+                modified_step(q, real)           # a changed dump of a real game comes back into the collection
             continue
         e, how, _dump = hit
         rom = e.rom if res.console.key != "nes" else Path(e.rom).stem + ".nes"
